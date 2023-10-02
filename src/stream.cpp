@@ -1464,6 +1464,7 @@ namespace stream {
     }
 
     ctx.video_sock.bind(udp::endpoint(protocol, video_port), ec);
+    BOOST_LOG(info) << "BIND: Bind Video server to port ["sv << video_port << "] ";
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Video server to port ["sv << video_port << "]: "sv << ec.message();
 
@@ -1478,6 +1479,7 @@ namespace stream {
     }
 
     ctx.audio_sock.bind(udp::endpoint(protocol, audio_port), ec);
+    BOOST_LOG(info) << "BIND: Bind Audio server to port ["sv << audio_port << "] ";
     if (ec) {
       BOOST_LOG(fatal) << "Couldn't bind Audio server to port ["sv << audio_port << "]: "sv << ec.message();
 
@@ -1600,6 +1602,36 @@ namespace stream {
     return -1;
   }
 
+  bool setECT(int sock, int value)
+  {
+    int iptos = 0;
+
+    // Get current TOS value
+    socklen_t toslen = sizeof(iptos);
+    int retVal = getsockopt(sock, IPPROTO_IP, IP_TOS,  &iptos, &toslen);
+    if (retVal < 0)
+    {
+	    BOOST_LOG(error) << "ECN: Failed to get TOS marking on socket " << sock << ". error:" << retVal;
+	    iptos = 0;
+    }
+    else
+    {
+	    BOOST_LOG(info) << "ECN: Got TOS " << iptos << " before setting ECN. toslen:" << toslen << " retVal:" << retVal;
+    }
+
+    // Set ECT on the last two bits
+    iptos = (iptos & 0xFC) | value;
+
+    BOOST_LOG(info) << "ECN: Setting tos to " << iptos;
+    retVal = setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
+    if (retVal < 0) {
+	BOOST_LOG(error) << "ECN: Not possible to set ECN bits. retVal: " << retVal;
+	return false;
+    }
+
+    return true;
+  }
+
   void
   videoThread(session_t *session) {
     auto fg = util::fail_guard([&]() {
@@ -1620,6 +1652,9 @@ namespace stream {
       session->video.qos = platf::enable_socket_qos(ref->video_sock.native_handle(), address,
         session->video.peer.port(), platf::qos_data_type_e::video);
     }
+
+    // SET ECN bits
+    setECT((int)ref->video_sock.native_handle(), 1);
 
     BOOST_LOG(debug) << "Start capturing Video"sv;
     video::capture(session->mail, session->config.monitor, session);

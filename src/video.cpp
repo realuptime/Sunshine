@@ -1279,6 +1279,22 @@ namespace video {
     auto &sps = session.sps;
     auto &vps = session.vps;
 
+#if 1
+    time_t now = time(0);
+    static time_t lastTime = now;
+    if (now > lastTime)
+    {
+      lastTime = now;
+      const auto ctxp = ctx.get();
+
+      //BOOST_LOG(info) << "DYNBITRATE: ctx->support_dyn_bitrate: " << ctxp->support_dyn_bitrate;
+      ctxp->bit_rate++;
+      BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate;
+
+      av_log_set_level(AV_LOG_VERBOSE);
+    }
+#endif
+
     // send the frame to the encoder
     auto ret = avcodec_send_frame(ctx.get(), frame);
     if (ret < 0) {
@@ -1550,6 +1566,12 @@ namespace video {
     for (auto &option : (config.dynamicRange ? video_format.hdr_options : video_format.sdr_options)) {
       handle_option(option);
     }
+
+    BOOST_LOG(info)
+      << "VIDEO: encoder.cbr:" << video_format[encoder_t::CBR] << '\n'
+      << " config.vbr:" << bool(encoder.flags & CBR_WITH_VBR) << '\n'
+      << " config.bitrate:" << config.bitrate << '\n'
+      ;
 
     if (video_format[encoder_t::CBR]) {
       auto bitrate = config.bitrate * 1000;

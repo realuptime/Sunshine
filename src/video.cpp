@@ -23,6 +23,8 @@ extern "C" {
 #include "sync.h"
 #include "video.h"
 
+#include "scream/Wrapper.h"
+
 #ifdef _WIN32
 extern "C" {
   #include <libavutil/hwcontext_d3d11va.h>

@@ -876,6 +876,13 @@ namespace stream {
       input::passthrough(session->input, std::move(plaintext));
     });
 
+    server->map(packetTypes[IDX_RTCP], [&](session_t *session, const std::string_view &payload) {
+      BOOST_LOG(debug) << "type [IDX_RTCP]"sv;
+      BOOST_LOG(info) << "type [IDX_RTCP] of size"sv << payload.size();
+	  // TODO
+    });
+
+
     server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {
       BOOST_LOG(verbose) << "type [IDX_ENCRYPTED]"sv;
 

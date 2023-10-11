@@ -11,7 +11,7 @@
 
 void packet_free(void *buf, uint32_t ssrc)
 {
-	//free(buf);
+	free(buf);
 }
 
 namespace scream {
@@ -193,9 +193,17 @@ void NewMediaFrame(uint32_t ts, uint32_t ssrc, uint8_t *buf, int size, uint16_t 
 
 	ts = getTimeInNtp();
 
+	void *cpy = malloc(size);
+	if (!cpy)
+	{
+		printf("SCREAM: OOM sz:%d\n", size);
+		return;
+	}
+	memcpy(cpy, buf, size);
+
 	{
 		std::lock_guard lock { lock_rtp_queue };
-		if (!rtpQueue->push(buf, size, ssrc, seqNr, isMark, ts / 65536.0f))
+		if (!rtpQueue->push(cpy, size, ssrc, seqNr, isMark, ts / 65536.0f))
 		{
 			printf("SCREAM: NewMediaFrame: RTPQUEUE IS FULL! sz:%d\n", rtpQueue->sizeOfQueue());
 			return;

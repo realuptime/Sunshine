@@ -182,18 +182,27 @@ void RegisterNewStream(uint32_t ssrc)
 
 void sendPacket(const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp::socket &sock, void* buf, int size)
 {
-	sock.send_to(boost::asio::buffer(buf, size), peer);
+	if (!buf) return;
+	try
+	{
+		sock.send_to(boost::asio::buffer(buf, size), peer);
+	}
+	catch (std::exception const& ex)
+	{
+		printf("SCREAM: sendPacket exception:%s\n", ex.what());
+	}
 }
 
 void NewMediaFrame(uint32_t ts, uint32_t ssrc, uint8_t *buf, int size, uint16_t seqNr, bool isMark)
 {
 	if (!screamTx) return;
 
-	//printf("SCREAM: NewMediaFrame(sz:%d)\n", size);
+	//printf("SCREAM: NewMediaFrame(sz:%d mark:%d)\n", size, isMark);
 
 	ts = getTimeInNtp();
 
-	void *cpy = malloc(size);
+	// Store a copy of the buffer
+	uint8_t *cpy = (uint8_t *)malloc(size);
 	if (!cpy)
 	{
 		printf("SCREAM: OOM sz:%d\n", size);
@@ -206,6 +215,7 @@ void NewMediaFrame(uint32_t ts, uint32_t ssrc, uint8_t *buf, int size, uint16_t 
 		if (!rtpQueue->push(cpy, size, ssrc, seqNr, isMark, ts / 65536.0f))
 		{
 			printf("SCREAM: NewMediaFrame: RTPQUEUE IS FULL! sz:%d\n", rtpQueue->sizeOfQueue());
+			delete cpy;
 			return;
 		}
 	}
@@ -296,13 +306,15 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 					retVal = 0.0f;
 				if (retVal > 0.0f)
 					accumulatedPaceTime += retVal;
-				if (retVal != -1.0) {
+				if (retVal != -1.0)
+				{
                     void *buf;
                     uint32_t ssrc_unused;
 					{
 						std::lock_guard lock { lock_rtp_queue };
 						rtpQueue->pop(&buf, size, ssrc_unused, seqNr, isMark);
 						sendPacket(peer, sock, buf, size);
+						//printf("SCREAM: sendPacket(%u buf:%p sz:%d)\n", ssrc, buf, size);
 					}
                     packet_free(buf, ssrc);
                     buf = NULL;
@@ -310,6 +322,7 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 						std::lock_guard lock { _lock };
 						time_ntp = getTimeInNtp();
 						retVal = screamTx->addTransmitted(time_ntp, ssrc, size, seqNr, isMark);
+						//printf("SCREAM: addTransmitted(%u seq:%d): paceInterval:%f\n", ssrc, int(seqNr), retVal);
 					}
 				}
 
@@ -331,17 +344,6 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 		usleep(sleepTime_us);
 		sleepTime_us = 0;
 	}
-}
-
-
-float IsOkToTransmit(uint32_t ts, uint32_t &ssrc)
-{
-	if (!screamTx) return -1.0f;
-	ts = getTimeInNtp();
-	float ret = screamTx->isOkToTransmit(ts, ssrc);
-	if (ret != -1.0f)
-		printf("SCREAM: IsOkToTransmit(%u): %f\n", ssrc, ret);
-	return ret;
 }
 
 float AddTransmitted(uint32_t ts, // Wall clock ts when packet is transmitted
@@ -373,25 +375,6 @@ void GetStatistics(float time, char *s, size_t size)
 	screamTx->getStatistics(time, s);
 }
 
-bool PopRTPQueue()
-{
-	std::lock_guard lock { lock_rtp_queue };
-
-	printf("SCREAM: PopRTPQueue: sz:%d\n", rtpQueue->sizeOfQueue());
-	if (!rtpQueue) return false;
-	if (rtpQueue->sizeOfQueue() <= 0)
-	{
-		return false;
-	}
-	void *buf;
-	int size;
-	uint32_t ssrc_unused;
-	uint16_t seqNr;
-	bool isMark;
-	rtpQueue->pop(&buf, size, ssrc_unused, seqNr, isMark);
-	return true;
-}
-
 std::mutex &GetLock()
 {
 	return _lock;
@@ -400,18 +383,24 @@ std::mutex &GetLock()
 bool IsLossEpoch(uint32_t ssrc)
 {
 	if (!screamTx) return false;
-	return screamTx->isLossEpoch(ssrc);
+	bool ret = screamTx->isLossEpoch(ssrc);
+	if (ret)
+	{
+		printf("SCREAM: IsLossEpoch: scream IDR. qsize:%d\n", rtpQueue->sizeOfQueue());
+	}
+	return ret;
 }
 
 void StartStreaming(uint32_t ssrc, const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp::socket &sock)
 {
+	printf("SCREAM: StartStreaming(ssrc:%u)\n", ssrc);
+
 	struct timeval tp;
 	gettimeofday(&tp, NULL);
 	t0 = tp.tv_sec + tp.tv_usec*1e-6 - 1e-3;
 
 	stopThread = false;
 	transmitThread = std::thread { transmitRtpThread, std::ref(sock), peer };
-	printf("SCREAM: StartStreaming(ssrc:%u)\n", ssrc);
 }
 
 void StopStreaming(uint32_t ssrc)

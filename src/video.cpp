@@ -1307,7 +1307,7 @@ namespace video {
 		{
 			// Force IDR
 			needIDR = true;
-		    BOOST_LOG(info) << "SCREAM: IDR request";
+		    //BOOST_LOG(info) << "SCREAM: IDR request";
 		}
 	}
 

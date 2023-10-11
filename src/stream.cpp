@@ -1325,7 +1325,8 @@ namespace stream {
           };
 
           // Use a batched send if it's supported on this platform
-          if (!platf::send_batch(batch_info)) {
+          if (!platf::send_batch(batch_info))
+		  {
             // Batched send is not available, so send each packet individually
             BOOST_LOG(verbose) << "Falling back to unbatched send"sv;
             for (auto x = 0; x < shards.size(); ++x) {
@@ -1787,6 +1788,11 @@ namespace stream {
       // Reset input on session stop to avoid stuck repeated keys
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
+
+	{
+		std::lock_guard lock { scream::GetLock() };
+		scream::StopStreaming(VIDEO_SSRC);
+	}
 
       BOOST_LOG(debug) << "Removing references to any connections..."sv;
       {

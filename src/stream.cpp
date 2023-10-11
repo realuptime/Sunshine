@@ -29,6 +29,8 @@ extern "C" {
 #include "thread_safe.h"
 #include "utility.h"
 
+#include "scream/Wrapper.h"
+
 #define IDX_START_A 0
 #define IDX_START_B 1
 #define IDX_INVALIDATE_REF_FRAMES 2
@@ -71,7 +73,6 @@ using asio::ip::udp;
 using namespace std::literals;
 
 namespace stream {
-
   enum class socket_e : int {
     video,
     audio
@@ -879,9 +880,10 @@ namespace stream {
     server->map(packetTypes[IDX_RTCP], [&](session_t *session, const std::string_view &payload) {
       BOOST_LOG(debug) << "type [IDX_RTCP]"sv;
       BOOST_LOG(info) << "type [IDX_RTCP] of size"sv << payload.size();
-	  // TODO
-    });
 
+	  std::lock_guard lock { scream::GetLock() };
+	  scream::ProcessRTCP(const_cast<unsigned char *>(reinterpret_cast<const unsigned char *>(payload.data())), payload.size());
+    });
 
     server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {
       BOOST_LOG(verbose) << "type [IDX_ENCRYPTED]"sv;
@@ -1126,17 +1128,32 @@ namespace stream {
     auto packets = mail::man->queue<video::packet_t>(mail::video_packets);
     auto timebase = boost::posix_time::microsec_clock::universal_time();
 
+	bool firstLoop = true;
+
+
     // Video traffic is sent on this thread
     platf::adjust_thread_priority(platf::thread_priority_e::high);
 
     stat_trackers::min_max_avg_tracker<uint16_t> frame_processing_latency_tracker;
 
-    while (auto packet = packets->pop()) {
+	while(auto packet = packets->pop())
+	{
       if (shutdown_event->peek()) {
         break;
       }
 
       auto session = (session_t *) packet->channel_data;
+
+	  if (firstLoop)
+	  {
+			firstLoop = false;
+
+			{
+				std::lock_guard lock { scream::GetLock() };
+				scream::StartStreaming(VIDEO_SSRC, session->video.peer, sock);
+			}
+	  }
+
       auto lowseq = session->video.lowseq;
 
       std::string_view payload { (char *) packet->data(), packet->data_size() };
@@ -1287,10 +1304,15 @@ namespace stream {
             inspect->rtp.sequenceNumber = util::endian::big<uint16_t>(lowseq + x);
             inspect->rtp.timestamp = util::endian::big<uint32_t>(timestamp);
 
+            // use SSRC 1 for video
+			inspect->rtp.ssrc = util::endian::big<uint32_t>(VIDEO_SSRC);
+			//BOOST_LOG(info) << "video ssid:"sv << inspect->rtp.ssrc;
+
             inspect->packet.multiFecBlocks = (blockIndex << 4) | lastBlockIndex;
             inspect->packet.frameIndex = packet->frame_index();
           }
 
+#if 0
           auto peer_address = session->video.peer.address();
           auto batch_info = platf::batched_send_info_t {
             shards.shards.begin(),
@@ -1319,6 +1341,21 @@ namespace stream {
               platf::send(send_info);
             }
           }
+#else
+
+            for (auto x = 0; x < shards.size(); ++x)
+			{
+				std::lock_guard lock { scream::GetLock() };
+				auto *inspect = (video_packet_raw_t *) shards.data(x);
+
+				scream::NewMediaFrame(0,
+						VIDEO_SSRC,
+						(uint8_t *)shards.data(x),
+						shards.blocksize,
+						lowseq + x,
+						inspect->packet.flags & FLAG_SOF);
+			}
+#endif
 
           if (packet->is_idr()) {
             BOOST_LOG(verbose) << "Key Frame ["sv << packet->frame_index() << "] :: send ["sv << shards.size() << "] shards..."sv;
@@ -1493,6 +1530,13 @@ namespace stream {
       return -1;
     }
 
+	// SCREAM Init
+	{
+		std::lock_guard lock { scream::GetLock() };
+		scream::Init();
+		scream::RegisterNewStream(VIDEO_SSRC); // video
+	}
+
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
     ctx.video_thread = std::thread { videoBroadcastThread, std::ref(ctx.video_sock) };
@@ -1535,6 +1579,11 @@ namespace stream {
     BOOST_LOG(debug) << "Waiting for main control thread to end..."sv;
     ctx.control_thread.join();
     BOOST_LOG(debug) << "All broadcasting threads ended"sv;
+
+	{
+		std::lock_guard lock { scream::GetLock() };
+		scream::StopStreaming(VIDEO_SSRC);
+	}
 
     broadcast_shutdown_event->reset();
   }
@@ -1631,9 +1680,10 @@ namespace stream {
 
     BOOST_LOG(info) << "ECN: Setting tos to " << iptos;
     retVal = setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
-    if (retVal < 0) {
-	BOOST_LOG(error) << "ECN: Not possible to set ECN bits. retVal: " << retVal;
-	return false;
+    if (retVal < 0)
+	{
+		BOOST_LOG(error) << "ECN: Not possible to set ECN bits. retVal: " << retVal;
+		return false;
     }
 
     return true;

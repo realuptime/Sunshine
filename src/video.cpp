@@ -22,6 +22,7 @@ extern "C" {
 #include "platform/common.h"
 #include "sync.h"
 #include "video.h"
+#include "stream.h"
 
 #include "scream/Wrapper.h"
 
@@ -1272,7 +1273,8 @@ namespace video {
   }
 
   int
-  encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+<<<<<<< HEAD
+  encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
     auto &frame = session.device->frame;
     frame->pts = frame_nr;
 
@@ -1281,21 +1283,33 @@ namespace video {
     auto &sps = session.sps;
     auto &vps = session.vps;
 
-#if 1
-    time_t now = time(0);
-    static time_t lastTime = now;
-    if (now > lastTime)
-    {
-      lastTime = now;
-      const auto ctxp = ctx.get();
+	needIDR = false;
 
-      //BOOST_LOG(info) << "DYNBITRATE: ctx->support_dyn_bitrate: " << ctxp->support_dyn_bitrate;
-      ctxp->bit_rate++;
-      BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate;
+	// SCREAM Target Bitrate
+	{
+		std::lock_guard lock { scream::GetLock() };
 
-      av_log_set_level(AV_LOG_VERBOSE);
-    }
+#if 0
+		float rate = scream::GetTargetBitrate(VIDEO_SSRC);
+		if (rate > 0.0f)
+		{
+			const auto ctxp = ctx.get();
+
+			const float rateMultiply = 1.0;
+			rate *= rateMultiply;
+
+		    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate << " -> " << int(rate);
+			ctxp->bit_rate = rate;
+		}
 #endif
+
+		if (scream::IsLossEpoch(VIDEO_SSRC))
+		{
+			// Force IDR
+			needIDR = true;
+		    BOOST_LOG(info) << "SCREAM: IDR request";
+		}
+	}
 
     // send the frame to the encoder
     auto ret = avcodec_send_frame(ctx.get(), frame);
@@ -1814,10 +1828,15 @@ namespace video {
         }
       }
 
-      if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp)) {
+	  bool needIDR = false;
+      if (encode(frame_nr++, *session, packets, channel_data, frame_timestamp, needIDR)) {
         BOOST_LOG(error) << "Could not encode video packet"sv;
         return;
       }
+	  if (needIDR)
+	  {
+		  idr_events->raise(true);
+	  }
 
       session->request_normal_frame();
     }
@@ -2032,12 +2051,17 @@ namespace video {
             frame_timestamp = img->frame_timestamp;
           }
 
-          if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp)) {
+		  bool needIDR = false;
+          if (encode(ctx->frame_nr++, *pos->session, ctx->packets, ctx->channel_data, frame_timestamp, needIDR)) {
             BOOST_LOG(error) << "Could not encode video packet"sv;
             ctx->shutdown_event->raise(true);
 
             continue;
           }
+		  if (needIDR)
+		  {
+			  ctx->idr_events->raise(true);
+		  }
 
           pos->session->request_normal_frame();
 
@@ -2246,7 +2270,8 @@ namespace video {
 
     auto packets = mail::man->queue<packet_t>(mail::video_packets);
     while (!packets->peek()) {
-      if (encode(1, *session, packets, nullptr, {})) {
+      bool needIDR = false;
+      if (encode(1, *session, packets, nullptr, {}, needIDR)) {
         return -1;
       }
     }

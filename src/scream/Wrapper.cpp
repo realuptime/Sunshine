@@ -5,15 +5,28 @@
 #include "RtpQueue.h"
 
 #include <sys/time.h>
+#include <unistd.h>
 
 #define V2
 
 void packet_free(void *buf, uint32_t ssrc)
 {
-	free(buf);
+	//free(buf);
 }
 
 namespace scream {
+
+std::mutex _lock;
+std::mutex lock_rtp_queue;
+std::thread transmitThread;
+bool transmitThreadRunning = false;
+
+// Accumulated pace time, used to avoid starting very short pace timers
+//  this can save some complexity at very higfh bitrates
+float accumulatedPaceTime = 0.0f;
+
+float minPaceInterval = 0.001f;
+int minPaceIntervalUs = 900;
 
 /*
 * ECN capable
@@ -26,7 +39,6 @@ int ect = -1;
 
 uint32_t rtcp_rx_time_ntp = 0;
 double t0 = 0;
-bool ntp = false; // use NTP timestamp in logfile
 
 float FPS = 60.0f; // Frames per second
 int fixedRate = 0;
@@ -36,7 +48,7 @@ float keyFrameInterval = 0.0;
 float keyFrameSize = 1.0;
 int initRate = 1000;
 int minRate = 1000;
-int maxRate = 200000;
+int maxRate = 8000;
 bool enableClockDriftCompensation = false;
 float burstTime = -1.0;
 float burstSleep = -1.0;
@@ -99,33 +111,33 @@ uint32_t getTimeInNtp()
 void Init()
 {
 #ifdef V2
-            screamTx = new ScreamV2Tx(
-                scaleFactor,
-                scaleFactor,
-                delayTarget,
-                (initRate * 100) / 8,
-                packetPacingHeadroom,
-                adaptivePaceHeadroom,
-                bytesInFlightHeadroom,
-                multiplicativeIncreaseFactor,
-                ect == 1,
-                false,
-                false,
-                enableClockDriftCompensation);
+	screamTx = new ScreamV2Tx(
+		scaleFactor,
+		scaleFactor,
+		delayTarget,
+		(initRate * 100) / 8,
+		packetPacingHeadroom,
+		adaptivePaceHeadroom,
+		bytesInFlightHeadroom,
+		multiplicativeIncreaseFactor,
+		ect == 1,
+		false,
+		false,
+		enableClockDriftCompensation);
 #else
-            screamTx = new ScreamV1Tx(scaleFactor, scaleFactor,
-                delayTarget,
-                false,
-                1.0f, dscale,
-                (initRate * 100) / 8,
-                packetPacingHeadroom,
-                20,
-                ect == 1,
-                false,
-                enableClockDriftCompensation,
-              2.0f,
-              isNewCc);
-            screamTx->setFastIncreaseFactor(fastIncreaseFactor);
+	screamTx = new ScreamV1Tx(scaleFactor, scaleFactor,
+		delayTarget,
+		false,
+		1.0f, dscale,
+		(initRate * 100) / 8,
+		packetPacingHeadroom,
+		20,
+		ect == 1,
+		false,
+		enableClockDriftCompensation,
+	  2.0f,
+	  isNewCc);
+	screamTx->setFastIncreaseFactor(fastIncreaseFactor);
 #endif
 
 	rtpQueue = new RtpQueue();
@@ -138,6 +150,7 @@ void Init()
 
 void RegisterNewStream(uint32_t ssrc)
 {
+	printf("SCREAM: RegisterNewStream(%u)\n", ssrc);
 #ifdef V2
         screamTx->registerNewStream(rtpQueue,
             ssrc,
@@ -167,15 +180,40 @@ void RegisterNewStream(uint32_t ssrc)
 #endif
 }
 
-void NewMediaFrame(uint32_t time_ntp, uint32_t ssrc, int bytesRtp, bool isMarker)
+void sendPacket(const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp::socket &sock, void* buf, int size)
 {
-	screamTx->newMediaFrame(time_ntp, ssrc, bytesRtp, isMarker);
+	sock.send_to(boost::asio::buffer(buf, size), peer);
+}
+
+void NewMediaFrame(uint32_t ts, uint32_t ssrc, uint8_t *buf, int size, uint16_t seqNr, bool isMark)
+{
+	if (!screamTx) return;
+
+	//printf("SCREAM: NewMediaFrame(sz:%d)\n", size);
+
+	ts = getTimeInNtp();
+
+	{
+		std::lock_guard lock { lock_rtp_queue };
+		if (!rtpQueue->push(buf, size, ssrc, seqNr, isMark, ts / 65536.0f))
+		{
+			printf("SCREAM: NewMediaFrame: RTPQUEUE IS FULL! sz:%d\n", rtpQueue->sizeOfQueue());
+			return;
+		}
+	}
+	
+	screamTx->newMediaFrame(ts, ssrc, size, isMark);
 }
 
 void ProcessRTCP(unsigned char *buf_rtcp, int size)
 {
+	printf("SCREAM: ProcessRTCP(sz:%d)\n", size);
+
+	if (!screamTx) return;
+
 	uint32_t time_ntp = getTimeInNtp(); // We need time in microseconds, roughly ms granularity is OK
 	char s[100];
+	const bool ntp = false;
 	if (ntp) {
 		struct timeval tp;
 		gettimeofday(&tp, NULL);
@@ -192,18 +230,123 @@ void ProcessRTCP(unsigned char *buf_rtcp, int size)
 	rtcp_rx_time_ntp = time_ntp;
 }
 
-float IsOkToTransmit(uint32_t time_ntp, uint32_t &ssrc)
+/*
+ * Transmit a packet if possible.
+ * If not allowed due to packet pacing restrictions,
+ * then start a timer.
+ */
+void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip::udp::endpoint &peer)
 {
-	return screamTx->isOkToTransmit(time_ntp, ssrc);
+	int size;
+	uint16_t seqNr;
+    bool isMark;
+	uint32_t time_ntp = getTimeInNtp();
+	int sleepTime_us = 10;
+	float retVal = 0.0f;
+	int sizeOfQueue;
+	struct timeval start, end;
+	useconds_t diff = 0;
+	float paceIntervalFixedRate = 0.0f;
+
+	transmitThreadRunning = true;
+
+	if (fixedRate > 0 && !disablePacing)
+	{
+		paceIntervalFixedRate = (mtu + 40)*8.0f / (fixedRate * 1000)*0.9;
+	}
+	for (;;)
+	{
+		if (stopThread)
+		{
+			return;
+		}
+
+		sleepTime_us = 1;
+		retVal = 0.0f;
+		uint32_t ssrc = 0;
+		{
+			std::lock_guard lock { _lock };
+			time_ntp = getTimeInNtp();
+			retVal = screamTx->isOkToTransmit(time_ntp, ssrc);
+		}
+
+		if (retVal != -1.0f)
+		{
+			{
+				std::lock_guard lock { lock_rtp_queue };
+				sizeOfQueue = rtpQueue->sizeOfQueue();
+			}
+			do
+			{
+				gettimeofday(&start, 0);
+				time_ntp = getTimeInNtp();
+
+				retVal = screamTx->isOkToTransmit(time_ntp, ssrc);
+				if (fixedRate > 0 && retVal >= 0.0f && sizeOfQueue > 0)
+					retVal = paceIntervalFixedRate;
+				if (disablePacing && sizeOfQueue > 0 && retVal > 0.0f)
+					retVal = 0.0f;
+				if (retVal > 0.0f)
+					accumulatedPaceTime += retVal;
+				if (retVal != -1.0) {
+                    void *buf;
+                    uint32_t ssrc_unused;
+					{
+						std::lock_guard lock { lock_rtp_queue };
+						rtpQueue->pop(&buf, size, ssrc_unused, seqNr, isMark);
+						sendPacket(peer, sock, buf, size);
+					}
+                    packet_free(buf, ssrc);
+                    buf = NULL;
+					{
+						std::lock_guard lock { _lock };
+						time_ntp = getTimeInNtp();
+						retVal = screamTx->addTransmitted(time_ntp, ssrc, size, seqNr, isMark);
+					}
+				}
+
+				{
+					std::lock_guard lock { lock_rtp_queue };
+					sizeOfQueue = rtpQueue->sizeOfQueue();
+				}
+				gettimeofday(&end, 0);
+				diff = end.tv_usec - start.tv_usec;
+				accumulatedPaceTime = std::max(0.0f, accumulatedPaceTime - diff * 1e-6f);
+			} while (accumulatedPaceTime <= minPaceInterval &&
+				retVal != -1.0f &&
+				sizeOfQueue > 0);
+			if (accumulatedPaceTime > 0) {
+				sleepTime_us = std::min((int)(accumulatedPaceTime*1e6f), minPaceIntervalUs);
+				accumulatedPaceTime = 0.0f;
+			}
+		}
+		usleep(sleepTime_us);
+		sleepTime_us = 0;
+	}
 }
 
-float AddTransmitted(uint32_t timestamp_ntp, // Wall clock ts when packet is transmitted
+
+float IsOkToTransmit(uint32_t ts, uint32_t &ssrc)
+{
+	if (!screamTx) return -1.0f;
+	ts = getTimeInNtp();
+	float ret = screamTx->isOkToTransmit(ts, ssrc);
+	if (ret != -1.0f)
+		printf("SCREAM: IsOkToTransmit(%u): %f\n", ssrc, ret);
+	return ret;
+}
+
+float AddTransmitted(uint32_t ts, // Wall clock ts when packet is transmitted
             uint32_t ssrc,
             int size,
             uint16_t seqNr,
             bool isMark)
 {
-	return screamTx->addTransmitted(timestamp_ntp,
+	printf("SCREAM: AddTransmitted(ts:%u ssrc:%u sz:%d seq:%u marker:%d)\n", ts, ssrc, size, seqNr, isMark);
+
+	if (!screamTx) return -1.0f;
+	ts = getTimeInNtp();
+	return screamTx->addTransmitted(ts,
             ssrc,
             size,
             seqNr,
@@ -212,13 +355,66 @@ float AddTransmitted(uint32_t timestamp_ntp, // Wall clock ts when packet is tra
 
 float GetTargetBitrate(uint32_t ssrc)
 {
+	if (!screamTx) return -1.0f;
 	return screamTx->getTargetBitrate(ssrc);
 }
 
 void GetStatistics(float time, char *s, size_t size)
 {
+	if (!screamTx) return;
 	screamTx->getStatistics(time, s);
 }
 
+bool PopRTPQueue()
+{
+	std::lock_guard lock { lock_rtp_queue };
+
+	printf("SCREAM: PopRTPQueue: sz:%d\n", rtpQueue->sizeOfQueue());
+	if (!rtpQueue) return false;
+	if (rtpQueue->sizeOfQueue() <= 0)
+	{
+		return false;
+	}
+	void *buf;
+	int size;
+	uint32_t ssrc_unused;
+	uint16_t seqNr;
+	bool isMark;
+	rtpQueue->pop(&buf, size, ssrc_unused, seqNr, isMark);
+	return true;
+}
+
+std::mutex &GetLock()
+{
+	return _lock;
+}
+
+bool IsLossEpoch(uint32_t ssrc)
+{
+	if (!screamTx) return false;
+	return screamTx->isLossEpoch(ssrc);
+}
+
+void StartStreaming(uint32_t ssrc, const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp::socket &sock)
+{
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	t0 = tp.tv_sec + tp.tv_usec*1e-6 - 1e-3;
+
+	stopThread = false;
+	transmitThread = std::thread { transmitRtpThread, std::ref(sock), peer };
+	printf("SCREAM: StartStreaming(ssrc:%u)\n", ssrc);
+}
+
+void StopStreaming(uint32_t ssrc)
+{
+	printf("SCREAM: StopStreaming(%u)\n", ssrc);
+	if (transmitThreadRunning)
+	{
+		stopThread = true;
+		transmitThread.join();
+		transmitThreadRunning = false;
+	}
+}
 
 } // namespace

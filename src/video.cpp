@@ -1303,10 +1303,11 @@ namespace video {
                 const float rateMultiply = 1.0;
                 rate *= rateMultiply;
 
-                if (ctxp->bit_rate != int(rate))
+                int iRate = rate;
+                if (ctxp->bit_rate != iRate)
                 {
-                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate << " -> " << int(rate);
-                    ctxp->bit_rate = rate;
+                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate << " -> " << iRate;
+                    ctxp->bit_rate = iRate;
                 }
             }
         }

@@ -7,7 +7,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define V2
+//#define V2
 
 void packet_free(void *buf, uint32_t ssrc)
 {
@@ -43,11 +43,11 @@ double t0 = 0;
 float FPS = 60.0f; // Frames per second
 int fixedRate = 0;
 bool isKeyFrame = false;
-bool disablePacing = false;
+bool disablePacing = 0;
 float keyFrameInterval = 0.0;
 float keyFrameSize = 1.0;
-int initRate = 1000;
-int minRate = 1000;
+int initRate = 500;
+int minRate = 200;
 int maxRate = 8000;
 bool enableClockDriftCompensation = false;
 float burstTime = -1.0;
@@ -81,17 +81,10 @@ float hysteresis = 0.0f;
 
 int periodicRateDropInterval = 600; // seconds*10
 
-
-uint16_t seqNr = 0;
 uint32_t lastKeyFrameT_ntp = 0;
 int mtu = 1200;
 float runTime = -1.0;
 bool stopThread = false;
-pthread_t create_rtp_thread = 0;
-pthread_t transmit_rtp_thread = 0;
-pthread_t rtcp_thread = 0;
-pthread_t sierra_python_thread = 0;
-bool sierraLog;
 
 float delayTarget = 0.06f;
 bool printSummary = true;
@@ -158,7 +151,7 @@ void RegisterNewStream(uint32_t ssrc)
             minRate * 1000,
             initRate * 1000,
             maxRate * 1000,
-            0.2f,
+            0.2f, // qdelay
             false,
             hysteresis);
 #else
@@ -170,7 +163,7 @@ void RegisterNewStream(uint32_t ssrc)
             maxRate * 1000,
             rateIncrease * 1000,
             rateScale,
-            0.2f,
+            0.2f, // qdelay
             txQueueSizeFactor,
             queueDelayGuard,
             scaleFactor,
@@ -225,7 +218,14 @@ void NewMediaFrame(uint32_t ts, uint32_t ssrc, uint8_t *buf, int size, uint16_t 
 
 void ProcessRTCP(unsigned char *buf_rtcp, int size)
 {
-	printf("SCREAM: ProcessRTCP(sz:%d)\n", size);
+	//printf("SCREAM: ProcessRTCP(sz:%d)\n", size);
+
+#if 0
+    std::string str;
+    for (int i = 0; i < std::min(size, 15); ++i)
+            str += std::to_string(int(buf_rtcp[i])) + ' ';
+	printf("SCREAM: RTCP: '%s'\n", str.c_str());
+#endif
 
 	if (!screamTx) return;
 
@@ -279,9 +279,10 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 			return;
 		}
 
-		sleepTime_us = 1;
+		sleepTime_us = 10;
 		retVal = 0.0f;
 		uint32_t ssrc = 0;
+#if 1
 		{
 			std::lock_guard lock { _lock };
 			time_ntp = getTimeInNtp();
@@ -289,6 +290,7 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 		}
 
 		if (retVal != -1.0f)
+#endif
 		{
 			{
 				std::lock_guard lock { lock_rtp_queue };
@@ -306,7 +308,7 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 					retVal = 0.0f;
 				if (retVal > 0.0f)
 					accumulatedPaceTime += retVal;
-				if (retVal != -1.0)
+				if (retVal != -1.0 && ssrc == VIDEO_SSRC)
 				{
                     void *buf;
                     uint32_t ssrc_unused;
@@ -335,8 +337,10 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 				accumulatedPaceTime = std::max(0.0f, accumulatedPaceTime - diff * 1e-6f);
 			} while (accumulatedPaceTime <= minPaceInterval &&
 				retVal != -1.0f &&
-				sizeOfQueue > 0);
-			if (accumulatedPaceTime > 0) {
+				sizeOfQueue > 0 &&
+				!stopThread);
+			if (accumulatedPaceTime > 0)
+			{
 				sleepTime_us = std::min((int)(accumulatedPaceTime*1e6f), minPaceIntervalUs);
 				accumulatedPaceTime = 0.0f;
 			}
@@ -384,10 +388,7 @@ bool IsLossEpoch(uint32_t ssrc)
 {
 	if (!screamTx) return false;
 	bool ret = screamTx->isLossEpoch(ssrc);
-	if (ret)
-	{
-		printf("SCREAM: IsLossEpoch: scream IDR. qsize:%d\n", rtpQueue->sizeOfQueue());
-	}
+	//if (ret) printf("SCREAM: IsLossEpoch: scream IDR. qsize:%d\n", rtpQueue->sizeOfQueue());
 	return ret;
 }
 
@@ -409,7 +410,10 @@ void StopStreaming(uint32_t ssrc)
 	if (transmitThreadRunning)
 	{
 		stopThread = true;
+
+		printf("SCREAM: StopStreaming(%u) waiting for transmitRtpThread to stop ...\n", ssrc);
 		transmitThread.join();
+		printf("SCREAM: StopStreaming(%u) transmitRtpThread DONE.\n", ssrc);
 		transmitThreadRunning = false;
 	}
 }

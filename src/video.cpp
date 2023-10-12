@@ -1289,18 +1289,24 @@ namespace video {
 	{
 		std::lock_guard lock { scream::GetLock() };
 
-#if 0
-		float rate = scream::GetTargetBitrate(VIDEO_SSRC);
-		if (rate > 0.0f)
-		{
-			const auto ctxp = ctx.get();
+#if 1
+        static time_t lastTime = time(0);
+        time_t now = time(0);
+        if (now != lastTime)
+        {
+            lastTime = now;
+            float rate = scream::GetTargetBitrate(VIDEO_SSRC);
+            if (rate > 0.0f)
+            {
+                const auto ctxp = ctx.get();
 
-			const float rateMultiply = 1.0;
-			rate *= rateMultiply;
+                const float rateMultiply = 1.0;
+                rate *= rateMultiply;
 
-		    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate << " -> " << int(rate);
-			ctxp->bit_rate = rate;
-		}
+                BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate << " -> " << int(rate);
+                ctxp->bit_rate = rate;
+            }
+        }
 #endif
 
 		if (scream::IsLossEpoch(VIDEO_SSRC))

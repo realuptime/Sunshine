@@ -879,10 +879,11 @@ namespace stream {
 
     server->map(packetTypes[IDX_RTCP], [&](session_t *session, const std::string_view &payload) {
       BOOST_LOG(debug) << "type [IDX_RTCP]"sv;
-      BOOST_LOG(info) << "type [IDX_RTCP] of size"sv << payload.size();
+      BOOST_LOG(info) << "type [IDX_RTCP] of size "sv << payload.size();
 
 	  std::lock_guard lock { scream::GetLock() };
-	  scream::ProcessRTCP(const_cast<unsigned char *>(reinterpret_cast<const unsigned char *>(payload.data())), payload.size());
+      if (payload.size() > 4)
+          scream::ProcessRTCP(const_cast<unsigned char *>(reinterpret_cast<const unsigned char *>(payload.data()) + 4), payload.size() - 4);
     });
 
     server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {
@@ -1537,6 +1538,8 @@ namespace stream {
 		scream::Init();
 		scream::RegisterNewStream(VIDEO_SSRC); // video
 	}
+
+    ctx.video_sock.non_blocking(true);
 
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 

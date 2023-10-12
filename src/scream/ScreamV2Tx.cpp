@@ -543,16 +543,17 @@ void ScreamV2Tx::incomingStandardizedFeedback(uint32_t time_ntp,
 	uint32_t rts;
 	memcpy(&rts, buf + length * 4, 4);
 	rts = ntohl(rts);
-	//printf(" TS %X\n", rts);
+	//printf("RTCP: RTS:%u len:%d\n", rts, int(length));
 
-
-	while (ptr != size - 4) {
+	while (ptr != size - 4)
+    {
 		/*
 		* read RTP source (stream) SSRC
 		*/
 		uint32_t ssrc;
 		memcpy(&ssrc, buf + ptr, 4);
 		ssrc = ntohl(ssrc);
+        //printf("RTCP: SSRC:%u ptr:%d/%d\n", ssrc, ptr, size);
 		ptr += 4;
 		/*
 		* read begin_seq and end_seq
@@ -567,6 +568,8 @@ void ScreamV2Tx::incomingStandardizedFeedback(uint32_t time_ntp,
 		num_reports = ntohs(num_reports) + 1;
 		end_seq = begin_seq + num_reports - 1;
 
+        //printf("RTCP: SSRC:%u ptr:%d/%d seq:[%d .. %d]\n", ssrc, ptr, size, begin_seq, end_seq);
+
 		/*
 		* Validate RTCP feedback message
 		* Discard out of order RTCP feedback,
@@ -579,8 +582,11 @@ void ScreamV2Tx::incomingStandardizedFeedback(uint32_t time_ntp,
 			/*
 			* Bogus RTCP?, the SSRC is wrong anyway, Skip
 			*/
+            //printf("Stream %d not found!\n", ssrc);
 			return;
 		}
+
+        //printf("RTCP: SSRC:%u ptr:%d/%d seq:[%d .. %d]\n", ssrc, ptr, size, begin_seq, end_seq);
 
 		uint16_t diff = end_seq - stream->hiSeqAck;
 
@@ -619,12 +625,13 @@ void ScreamV2Tx::incomingStandardizedFeedback(uint32_t time_ntp,
 				incomingStandardizedFeedback(time_ntp, streamId, rxTime, sn, ceBits, n == N);
 			}
 		}
-        if (isUseExtraDetailedLog) {
+        if (isUseExtraDetailedLog)
+        {
             time_ntp = time_ntp;
             float rtpQueueDelay = stream->rtpQueue->getDelay(time_ntp * ntp2SecScaleFactor);
             int Last = stream->rtpQueue->seqNrOfLastRtp();
             int pak_diff = (Last == -1) ? -1 : ((Last >=  stream->hiSeqTx ) ? (Last -  stream->hiSeqTx ) : Last + 0xffff -  stream->hiSeqTx);
-            printf("%s diff %d %6u %u beg_seq %u num_reps %u end_seq %u nRx %u unused %u sQ %d first %u last %u NrNext %d Last %d hiSeqTx %u hiSeqAck %u packetsRtp %lu rtpQueueDelay %f sRtt %f\n",
+            printf("RTCP: %s diff %d %6u %u beg_seq %u num_reps %u end_seq %u nRx %u unused %u sQ %d first %u last %u NrNext %d Last %d hiSeqTx %u hiSeqAck %u packetsRtp %lu rtpQueueDelay %f sRtt %f\n",
 				   logTag, pak_diff,
                    time_ntp - time_ntp_prev, time_ntp, begin_seq, num_reports, end_seq, nRx, unused, size_before,
                    first, last, stream->rtpQueue->seqNrOfNextRtp(), Last,

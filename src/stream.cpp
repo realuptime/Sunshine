@@ -878,8 +878,8 @@ namespace stream {
     });
 
     server->map(packetTypes[IDX_RTCP], [&](session_t *session, const std::string_view &payload) {
-      BOOST_LOG(debug) << "type [IDX_RTCP]"sv;
-      BOOST_LOG(info) << "type [IDX_RTCP] of size "sv << payload.size();
+      //BOOST_LOG(debug) << "type [IDX_RTCP]"sv;
+      //BOOST_LOG(info) << "type [IDX_RTCP] of size "sv << payload.size();
 
 	  std::lock_guard lock { scream::GetLock() };
       if (payload.size() > 4)

@@ -42,19 +42,11 @@ double t0 = 0;
 
 float FPS = 60.0f; // Frames per second
 int fixedRate = 0;
-bool isKeyFrame = false;
 bool disablePacing = 0;
-float keyFrameInterval = 0.0;
-float keyFrameSize = 1.0;
 int initRate = 500;
 int minRate = 200;
 int maxRate = 8000;
 bool enableClockDriftCompensation = false;
-float burstTime = -1.0;
-float burstSleep = -1.0;
-bool isBurst = false;
-float burstStartTime = -1.0;
-float burstSleepTime = -1.0;
 #ifdef V2
 float packetPacingHeadroom = 1.5f;
 float scaleFactor = 0.7f;
@@ -68,7 +60,6 @@ float dscale = 10.0f;
 float packetPacingHeadroom = 1.25f;
 float scaleFactor = 0.9f;
 ScreamV1Tx *screamTx = 0;
-float bytesInFlightHeadroom = 1.25f;
 float txQueueSizeFactor = 0.1f;
 float queueDelayGuard = 0.05f;
 float fastIncreaseFactor = 1.0f;
@@ -128,15 +119,15 @@ void Init()
 		ect == 1,
 		false,
 		enableClockDriftCompensation,
-	  2.0f,
-	  isNewCc);
+	    1.0f,
+	    isNewCc);
 	screamTx->setFastIncreaseFactor(fastIncreaseFactor);
 #endif
 
 	rtpQueue = new RtpQueue();
 
 	screamTx->setCwndMinLow(5000);
-    screamTx->setPostCongestionDelay(postCongestionDelay);
+    //screamTx->setPostCongestionDelay(postCongestionDelay);
     if (disablePacing)
 		screamTx->enablePacketPacing(false);
 }

@@ -2768,3 +2768,4 @@ bool ScreamV1Tx::Stream::isLossEpoch() {
 	lossEpoch = false;
 	return tmp;
 }
+

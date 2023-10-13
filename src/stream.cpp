@@ -1241,6 +1241,10 @@ namespace stream {
         fec_blocks_begin = std::begin(fec_blocks),
         fec_blocks_end = std::begin(fec_blocks) + 1;
 
+#if 0
+      multi_fec_threshold = payload.size(); // test
+#endif
+
       auto lastBlockIndex = 0;
       if (payload.size() > multi_fec_threshold) {
         BOOST_LOG(verbose) << "Generating multiple FEC blocks"sv;
@@ -1286,7 +1290,22 @@ namespace stream {
             }
           }
 
+#if 0
+          session->config.minRequiredFecPackets = 1;
+          fecPercentage = 100;
+#endif
+
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
+
+#if 1
+          static time_t last = time(0);
+          time_t now = time(0);
+          if (now > last)
+          {
+              last = now;
+              printf("nshards:%d fecPercentage:%d minRequiredFecPackets:%d\n", int(shards.size()), fecPercentage, session->config.minRequiredFecPackets);
+          }
+#endif
 
           // set FEC info now that we know for sure what our percentage will be for this frame
           for (auto x = 0; x < shards.size(); ++x) {
@@ -1539,7 +1558,7 @@ namespace stream {
 		scream::RegisterNewStream(VIDEO_SSRC); // video
 	}
 
-    ctx.video_sock.non_blocking(true);
+    //ctx.video_sock.non_blocking(true);
 
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
@@ -1584,10 +1603,8 @@ namespace stream {
     ctx.control_thread.join();
     BOOST_LOG(debug) << "All broadcasting threads ended"sv;
 
-	{
-		std::lock_guard lock { scream::GetLock() };
-		scream::StopStreaming(VIDEO_SSRC);
-	}
+    // No lock to avoid deadlock!
+    scream::StopStreaming(VIDEO_SSRC);
 
     broadcast_shutdown_event->reset();
   }
@@ -1707,12 +1724,14 @@ namespace stream {
       return;
     }
 
+#if 1
     // Enable QoS tagging on video traffic if requested by the client
     if (session->config.videoQosType) {
       auto address = session->video.peer.address();
       session->video.qos = platf::enable_socket_qos(ref->video_sock.native_handle(), address,
         session->video.peer.port(), platf::qos_data_type_e::video);
     }
+#endif
 
     // SET ECN bits
     setECT((int)ref->video_sock.native_handle(), 1);

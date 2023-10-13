@@ -1300,14 +1300,19 @@ namespace video {
             {
                 const auto ctxp = ctx.get();
 
-                const float rateMultiply = 1.0;
+                const float rateMultiply = 1.0f;
                 rate *= rateMultiply;
 
+                rate = std::max(rate - 1000000.0f, 200000.0f);
+
                 int iRate = rate;
-                if (ctxp->bit_rate != iRate)
+                //if (ctxp->bit_rate != iRate)
                 {
-                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << ctxp->bit_rate << " -> " << iRate;
+                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << (ctxp->bit_rate / 1000) << " -> " << (iRate / 1000);
                     ctxp->bit_rate = iRate;
+                    ctxp->rc_min_rate = iRate;
+                    ctxp->rc_max_rate = iRate;
+                    //ctx->rc_buffer_size = iRate / 60;
                 }
             }
         }

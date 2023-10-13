@@ -123,6 +123,7 @@ extern "C" {
 			Statistics(ScreamTx *parent);
 			void getSummary(float time, char s[]);
 			void add(float rateTx, float rateLost, float rtt, float queueDelay);
+            float getAvgTransmitRate();
 		private:
 			float lossRateHist[kLossRateHistSize];
 			float rateLostAcc;
@@ -438,8 +439,6 @@ extern "C" {
 		void autoTuneMinCwnd(bool isAutotune) {
 			isAutoTuneMinCwnd = isAutotune;
 		}
-
-
 
 	private:
 		/*

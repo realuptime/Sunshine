@@ -74,4 +74,8 @@ void ScreamTx::getStatistics(float time, char* s) {
 	statistics->getSummary(time, s);
 }
 
+float ScreamTx::Statistics::getAvgTransmitRate()
+{
+    return avgRateTx;
+}
 

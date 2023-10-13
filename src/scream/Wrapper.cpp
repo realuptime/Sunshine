@@ -18,8 +18,13 @@ namespace scream {
 
 std::mutex _lock;
 std::mutex lock_rtp_queue;
+
 std::thread transmitThread;
 bool transmitThreadRunning = false;
+
+std::thread logThread;
+bool stopLogThread = false;
+bool logThreadRunning = false;
 
 // Accumulated pace time, used to avoid starting very short pace timers
 //  this can save some complexity at very higfh bitrates
@@ -27,6 +32,8 @@ float accumulatedPaceTime = 0.0f;
 
 float minPaceInterval = 0.001f;
 int minPaceIntervalUs = 900;
+
+bool sendingPacket = false;
 
 /*
 * ECN capable
@@ -43,8 +50,8 @@ double t0 = 0;
 float FPS = 60.0f; // Frames per second
 int fixedRate = 0;
 bool disablePacing = 0;
-int initRate = 500;
-int minRate = 200;
+int initRate = 700;
+int minRate = 700;
 int maxRate = 8000;
 bool enableClockDriftCompensation = false;
 #ifdef V2
@@ -167,6 +174,7 @@ void RegisterNewStream(uint32_t ssrc)
 void sendPacket(const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp::socket &sock, void* buf, int size)
 {
 	if (!buf) return;
+    sendingPacket = true;
 	try
 	{
 		sock.send_to(boost::asio::buffer(buf, size), peer);
@@ -175,6 +183,7 @@ void sendPacket(const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp
 	{
 		printf("SCREAM: sendPacket exception:%s\n", ex.what());
 	}
+    sendingPacket = false;
 }
 
 void NewMediaFrame(uint32_t ts, uint32_t ssrc, uint8_t *buf, int size, uint16_t seqNr, bool isMark)
@@ -237,6 +246,42 @@ void ProcessRTCP(unsigned char *buf_rtcp, int size)
 	screamTx->incomingStandardizedFeedback(time_ntp, buf_rtcp, size);
 
 	rtcp_rx_time_ntp = time_ntp;
+}
+
+uint32_t lastLogT_ntp = 0;
+void logThreadProc()
+{
+    logThreadRunning = true;
+
+    while (!stopLogThread)
+    {
+		uint32_t time_ntp = getTimeInNtp();
+		bool isFeedback = time_ntp - rtcp_rx_time_ntp < 65536; // 1s in Q16
+		if ((printSummary || !isFeedback) && time_ntp - lastLogT_ntp > 2 * 65536) // 2s in Q16
+		{
+			if (!isFeedback)
+            {
+                std::cerr << "SCREAM: No RTCP feedback received" << endl;
+			}
+			else if (screamTx)
+            {
+                std::lock_guard lock { _lock };
+
+                int targetRate = screamTx->getTargetBitrate(VIDEO_SSRC) / 1000.0f;
+                int transmitRate = screamTx->statistics->getAvgTransmitRate() / 1000.0f;
+
+                float time_s = time_ntp / 65536.0f;
+                char s[500];
+                screamTx->getStatistics(time_s, s);
+
+                int diff = transmitRate - targetRate;
+                std::cout << "SCREAM: " << s << ", Target rate = " << targetRate << "kbps, diff = " << diff << "kbps" << std::endl;
+			}
+			lastLogT_ntp = time_ntp;
+		}
+
+        usleep(50000);
+    }
 }
 
 /*
@@ -393,6 +438,9 @@ void StartStreaming(uint32_t ssrc, const boost::asio::ip::udp::endpoint &peer, b
 
 	stopThread = false;
 	transmitThread = std::thread { transmitRtpThread, std::ref(sock), peer };
+
+    stopLogThread = false;
+	logThread = std::thread { logThreadProc };
 }
 
 void StopStreaming(uint32_t ssrc)
@@ -402,11 +450,21 @@ void StopStreaming(uint32_t ssrc)
 	{
 		stopThread = true;
 
-		printf("SCREAM: StopStreaming(%u) waiting for transmitRtpThread to stop ...\n", ssrc);
+		printf("SCREAM: StopStreaming(%u) waiting for transmitRtpThread to stop ... sendingPacket:%d\n", ssrc, sendingPacket);
 		transmitThread.join();
 		printf("SCREAM: StopStreaming(%u) transmitRtpThread DONE.\n", ssrc);
 		transmitThreadRunning = false;
 	}
+
+	if (logThreadRunning)
+	{
+		stopLogThread = true;
+
+		printf("SCREAM: StopStreaming(%u) waiting for logThread to stop ...\n", ssrc);
+		logThread.join();
+		printf("SCREAM: StopStreaming(%u) logThread DONE.\n", ssrc);
+		logThreadRunning = false;
+	}
 }
 
-} // namespace
+} // namespace scream

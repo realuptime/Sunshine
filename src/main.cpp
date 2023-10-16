@@ -538,6 +538,9 @@ main(int argc, char *argv[]) {
     }
   });
 
+  // test: use verbose avcodec logging
+  av_log_set_level(AV_LOG_VERBOSE);
+
   sink = boost::make_shared<text_sink>();
 
   boost::shared_ptr<std::ostream> stream { &std::cout, NoDelete {} };

@@ -1811,10 +1811,8 @@ namespace stream {
       BOOST_LOG(debug) << "Resetting Input..."sv;
       input::reset(session.input);
 
-	{
-		std::lock_guard lock { scream::GetLock() };
-		scream::StopStreaming(VIDEO_SSRC);
-	}
+      // Stop scream, no lock do avoid deadlock
+	  scream::StopStreaming(VIDEO_SSRC);
 
       BOOST_LOG(debug) << "Removing references to any connections..."sv;
       {

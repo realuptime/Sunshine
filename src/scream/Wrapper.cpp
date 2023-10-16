@@ -16,6 +16,8 @@ void packet_free(void *buf, uint32_t ssrc)
 
 namespace scream {
 
+float qdelay = 0.2f;
+
 std::mutex _lock;
 std::mutex lock_rtp_queue;
 
@@ -149,7 +151,7 @@ void RegisterNewStream(uint32_t ssrc)
             minRate * 1000,
             initRate * 1000,
             maxRate * 1000,
-            0.2f, // qdelay
+            qdelay, // qdelay
             false,
             hysteresis);
 #else
@@ -161,7 +163,7 @@ void RegisterNewStream(uint32_t ssrc)
             maxRate * 1000,
             rateIncrease * 1000,
             rateScale,
-            0.2f, // qdelay
+            qdelay, // qdelay
             txQueueSizeFactor,
             queueDelayGuard,
             scaleFactor,

@@ -872,6 +872,21 @@ namespace video {
       {
         { "preset"s, &config::video.sw.sw_preset },
         { "tune"s, &config::video.sw.sw_tune },
+
+#if 1 // test CBR
+        { "x264opts"s, "force-cfr=1:bitrate=6400:log=3:pass=2:stats=stats"},
+        //{ "x264opts"s, "bitrate=6400:vbv-maxrate=6400:vbv-bufsize=400:filler=1:log=3:pass=1:stats=stats"},
+        //{ "x264opts"s, "bitrate=6400:vbv-maxrate=6400:vbv-bufsize=400:filler=1:log=3:pass=1:stats=stats:qpmin=10:qpmax=51:qpstep=4:mbtree=1"},
+        //{ "x264opts"s, "bitrate=8000" },
+        //{ "x264opts"s, "bitrate=8000:filler=1:log=3" },
+        //{ "x264opts"s, "nal-hrd=cbr:force-cfr=1:bitrate=6400:vbv-maxrate=6400:vbv-bufsize=400:log=3:pass=1:stats=stats" },
+        //{ "x264opts"s, "nal-hrd=cbr:force-cfr=1:bitrate=6400:log=3:stats=stats" }, // works!
+
+        { "nal-hrd"s, "0" },
+
+        //{ "cbr"s, "1" },
+        //{ "nal-hrd"s, "cbr" },
+#endif
       },
       {},  // SDR-specific options
       {},  // HDR-specific options
@@ -1300,10 +1315,13 @@ namespace video {
             {
                 const auto ctxp = ctx.get();
 
+                //const float rateMultiply = 0.5f;
+                //const float rateMultiply = 0.99f;
+                //const float rateMultiply = 0.99f;
                 const float rateMultiply = 1.0f;
                 rate *= rateMultiply;
 
-                rate = std::max(rate - 1000000.0f, 200000.0f);
+                rate = std::max(rate - 2000000.0f, 200000.0f); // substract 1400 Mbps for video + 400kbps for audio
 
                 int iRate = rate;
                 //if (ctxp->bit_rate != iRate)
@@ -1311,12 +1329,17 @@ namespace video {
                     BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << (ctxp->bit_rate / 1000) << " -> " << (iRate / 1000);
                     ctxp->bit_rate = iRate;
                     ctxp->rc_min_rate = iRate;
-                    ctxp->rc_max_rate = iRate;
-                    //ctx->rc_buffer_size = iRate / 60;
+                    ctxp->rc_max_rate = iRate + 1001;
+
+#if 1
+                    ctxp->rc_buffer_size = iRate / 60;
+                    //ctxp->rc_buffer_size = rate / ((60.0f * 10) / 15);
+                    //ctxp->rc_buffer_size = iRate;
+                    //ctxp->rc_buffer_size = (iRate / 60.0) * 3.0f;
+#endif
                 }
             }
         }
-#endif
 
 		if (scream::IsLossEpoch(VIDEO_SSRC))
 		{
@@ -1324,6 +1347,7 @@ namespace video {
 			needIDR = true;
 		    //BOOST_LOG(info) << "SCREAM: IDR request";
 		}
+#endif
 	}
 
     // send the frame to the encoder
@@ -1609,6 +1633,7 @@ namespace video {
       ctx->rc_max_rate = bitrate;
       ctx->bit_rate = bitrate;
 
+#if 1 // x264 CBR test
       if (encoder.flags & CBR_WITH_VBR) {
         // Ensure rc_max_bitrate != bit_rate to force VBR mode
         ctx->bit_rate--;
@@ -1633,6 +1658,7 @@ namespace video {
           ctx->rc_buffer_size = bitrate / config.framerate;
         }
       }
+#endif
     }
     else if (video_format.qp) {
       handle_option(*video_format.qp);

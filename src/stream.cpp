@@ -1266,7 +1266,11 @@ namespace stream {
         fec_blocks[0] = payload;
       }
 
-      try {
+      size_t numShards = 0;
+      int transmittedSize = 0;
+
+      try
+      {
         auto blockIndex = 0;
         std::for_each(fec_blocks_begin, fec_blocks_end, [&](std::string_view &current_payload) {
           auto packets = (current_payload.size() + (blocksize - 1)) / blocksize;
@@ -1290,25 +1294,13 @@ namespace stream {
             }
           }
 
-#if 0
-          session->config.minRequiredFecPackets = 1;
-          fecPercentage = 100;
-#endif
-
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
 
-#if 1
-          static time_t last = time(0);
-          time_t now = time(0);
-          if (now > last)
-          {
-              last = now;
-              printf("nshards:%d fecPercentage:%d minRequiredFecPackets:%d\n", int(shards.size()), fecPercentage, session->config.minRequiredFecPackets);
-          }
-#endif
+          numShards += shards.size();
 
           // set FEC info now that we know for sure what our percentage will be for this frame
-          for (auto x = 0; x < shards.size(); ++x) {
+          for (auto x = 0; x < shards.size(); ++x)
+          {
             auto *inspect = (video_packet_raw_t *) shards.data(x);
 
             // RTP video timestamps use a 90 KHz clock
@@ -1330,8 +1322,9 @@ namespace stream {
 
             inspect->packet.multiFecBlocks = (blockIndex << 4) | lastBlockIndex;
             inspect->packet.frameIndex = packet->frame_index();
-          }
 
+            transmittedSize += shards.blocksize;
+          }
 #if 0
           auto peer_address = session->video.peer.address();
           auto batch_info = platf::batched_send_info_t {
@@ -1364,7 +1357,7 @@ namespace stream {
           }
 #else
 
-            for (auto x = 0; x < shards.size(); ++x)
+            for (auto x = 0; x < shards.nr_shards; ++x)
 			{
 				std::lock_guard lock { scream::GetLock() };
 				auto *inspect = (video_packet_raw_t *) shards.data(x);
@@ -1388,6 +1381,28 @@ namespace stream {
           ++blockIndex;
           lowseq += shards.size();
         });
+
+#if 1
+          static time_t last = time(0);
+          time_t now = time(0);
+          if (now > last)
+          {
+              last = now;
+
+              printf("nshards:%zu"
+                " fecPercentage:%d"
+                " minRequiredFecPackets:%d"
+                " additionalData:%d kbps\n"
+                ,
+                numShards,
+                fecPercentage,
+                session->config.minRequiredFecPackets,
+                //(transmittedSize - int(payload.size())) * 8 / 1000
+                (transmittedSize - int(av_packet->size)) * 8 / 1000
+              );
+          }
+#endif
+
 
         session->video.lowseq = lowseq;
       }

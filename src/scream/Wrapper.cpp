@@ -16,6 +16,8 @@ void packet_free(void *buf, uint32_t ssrc)
 
 namespace scream {
 
+bool useL4S = true;
+
 float qdelay = 0.2f;
 
 std::mutex _lock;
@@ -36,15 +38,6 @@ float minPaceInterval = 0.001f;
 int minPaceIntervalUs = 900;
 
 bool sendingPacket = false;
-
-/*
-* ECN capable
-* -1 = Not-ECT
-* 0 = ECT(0)
-* 1 = ECT(1)
-* 3 = CE
-*/
-int ect = 1;
 
 uint32_t rtcp_rx_time_ntp = 0;
 double t0 = 0;
@@ -112,7 +105,7 @@ void Init()
 		adaptivePaceHeadroom,
 		bytesInFlightHeadroom,
 		multiplicativeIncreaseFactor,
-		ect == 1,
+		useL4S,
 		false,
 		false,
 		enableClockDriftCompensation);
@@ -124,7 +117,7 @@ void Init()
 		(initRate * 100) / 8,
 		packetPacingHeadroom,
 		20,
-		ect == 1,
+		useL4S,
 		false,
 		enableClockDriftCompensation,
 	    1.0f,

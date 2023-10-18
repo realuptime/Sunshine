@@ -1124,7 +1124,8 @@ namespace stream {
   }
 
   void
-  videoBroadcastThread(udp::socket &sock) {
+  videoBroadcastThread(udp::socket &sock)
+  {
     auto shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
     auto packets = mail::man->queue<video::packet_t>(mail::video_packets);
     auto timebase = boost::posix_time::microsec_clock::universal_time();
@@ -1266,8 +1267,7 @@ namespace stream {
         fec_blocks[0] = payload;
       }
 
-      size_t numShards = 0;
-      int transmittedSize = 0;
+      int curTransSize = 0;
 
       try
       {
@@ -1296,8 +1296,6 @@ namespace stream {
 
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
 
-          numShards += shards.size();
-
           // set FEC info now that we know for sure what our percentage will be for this frame
           for (auto x = 0; x < shards.size(); ++x)
           {
@@ -1323,7 +1321,7 @@ namespace stream {
             inspect->packet.multiFecBlocks = (blockIndex << 4) | lastBlockIndex;
             inspect->packet.frameIndex = packet->frame_index();
 
-            transmittedSize += shards.blocksize;
+            curTransSize += shards.blocksize;
           }
 #if 0
           auto peer_address = session->video.peer.address();
@@ -1383,26 +1381,39 @@ namespace stream {
         });
 
 #if 1
+          static int accumTransSize = 0, accumPayloadSize = 0;
+          accumTransSize += curTransSize;
+          accumPayloadSize += int(av_packet->size); // int(payload.size())
+
           static time_t last = time(0);
-          time_t now = time(0);
+          const time_t now = time(0);
           if (now > last)
           {
+              size_t nsec = now - last;
+
               last = now;
 
-              printf("nshards:%zu"
+              accumTransSize /= nsec;
+              accumPayloadSize /= nsec;
+
+              const int additionalData = accumTransSize - accumPayloadSize;
+              const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
+              printf("SCREAM: nsec:%zu "
                 " fecPercentage:%d"
-                " minRequiredFecPackets:%d"
-                " additionalData:%d kbps\n"
+                " additionalDataRate:%d + encoderRate:%d = toSendRate:%d kbps / %.1f%% addition\n"
                 ,
-                numShards,
+                nsec,
                 fecPercentage,
-                session->config.minRequiredFecPackets,
-                //(transmittedSize - int(payload.size())) * 8 / 1000
-                (transmittedSize - int(av_packet->size)) * 8 / 1000
+                additionalData * 8 / 1000,
+                accumPayloadSize * 8 / 1000,
+                accumTransSize * 8 / 1000,
+                additionalDataPrc 
               );
+
+              accumTransSize = 0;
+              accumPayloadSize = 0;
           }
 #endif
-
 
         session->video.lowseq = lowseq;
       }

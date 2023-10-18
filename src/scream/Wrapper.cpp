@@ -7,7 +7,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-//#define V2
+#define V2
 
 void packet_free(void *buf, uint32_t ssrc)
 {
@@ -44,12 +44,11 @@ bool sendingPacket = false;
 * 1 = ECT(1)
 * 3 = CE
 */
-int ect = -1;
+int ect = 1;
 
 uint32_t rtcp_rx_time_ntp = 0;
 double t0 = 0;
 
-float FPS = 60.0f; // Frames per second
 int fixedRate = 0;
 bool disablePacing = 0;
 int initRate = 700;
@@ -353,6 +352,10 @@ void transmitRtpThread(boost::asio::ip::udp::socket &sock, const boost::asio::ip
 					{
 						std::lock_guard lock { lock_rtp_queue };
 						rtpQueue->pop(&buf, size, ssrc_unused, seqNr, isMark);
+                        if (ssrc_unused != VIDEO_SSRC)
+                        {
+                            printf("SCREAM: invalid SSRC %d used!", ssrc_unused);
+                        }
 						sendPacket(peer, sock, buf, size);
 						//printf("SCREAM: sendPacket(%u buf:%p sz:%d)\n", ssrc, buf, size);
 					}

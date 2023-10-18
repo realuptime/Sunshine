@@ -572,15 +572,23 @@ namespace stream {
       auto pad = payload_size % blocksize != 0;
 
       auto data_shards = payload_size / blocksize + (pad ? 1 : 0);
+
+#if 0
       auto parity_shards = (data_shards * fecpercentage + 99) / 100;
 
       // increase the FEC percentage for this frame if the parity shard minimum is not met
-      if (parity_shards < minparityshards) {
+      if (parity_shards < minparityshards)
+      {
+        BOOST_LOG(warning) << "Increasing FEC percentage! minparityshards:"sv << minparityshards << " parity_shards:"sv << parity_shards << " data_shards:"sv << data_shards << std::endl;
+
         parity_shards = minparityshards;
         fecpercentage = (100 * parity_shards) / data_shards;
 
-        BOOST_LOG(verbose) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
+        BOOST_LOG(warning) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
       }
+#else
+      int parity_shards = std::max(1, int(minparityshards) - int(data_shards));
+#endif
 
       auto nr_shards = data_shards + parity_shards;
       if (nr_shards > DATA_SHARDS_MAX) {
@@ -1216,6 +1224,7 @@ namespace stream {
 
       // insert packet headers
       auto blocksize = session->config.packetsize + MAX_RTP_HEADER_SIZE;
+
       auto payload_blocksize = blocksize - sizeof(video_packet_raw_t);
 
       auto fecPercentage = config::stream.fec_percentage;
@@ -1268,6 +1277,7 @@ namespace stream {
       }
 
       int curTransSize = 0;
+      int curNShards = 0;
 
       try
       {
@@ -1323,6 +1333,7 @@ namespace stream {
 
             curTransSize += shards.blocksize;
           }
+          curNShards += shards.size();
 #if 0
           auto peer_address = session->video.peer.address();
           auto batch_info = platf::batched_send_info_t {
@@ -1354,8 +1365,7 @@ namespace stream {
             }
           }
 #else
-
-            for (auto x = 0; x < shards.nr_shards; ++x)
+            for (auto x = 0; x < shards.size(); ++x)
 			{
 				std::lock_guard lock { scream::GetLock() };
 				auto *inspect = (video_packet_raw_t *) shards.data(x);
@@ -1381,9 +1391,11 @@ namespace stream {
         });
 
 #if 1
-          static int accumTransSize = 0, accumPayloadSize = 0;
+          static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
           accumTransSize += curTransSize;
           accumPayloadSize += int(av_packet->size); // int(payload.size())
+          nPackets++;
+          nShards += curNShards;
 
           static time_t last = time(0);
           const time_t now = time(0);
@@ -1398,11 +1410,18 @@ namespace stream {
 
               const int additionalData = accumTransSize - accumPayloadSize;
               const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
-              printf("SCREAM: nsec:%zu "
+              printf("SCREAM: nsec:%zu cfgPktSize:%d BS:%d NP:%d shards:%d/%.0f%%/%d frame:%d"
                 " fecPercentage:%d"
                 " additionalDataRate:%d + encoderRate:%d = toSendRate:%d kbps / %.1f%% addition\n"
                 ,
                 nsec,
+                session->config.packetsize,
+                blocksize,
+                nPackets,
+                nShards,
+                float(nShards) * 100.0f / nPackets,
+                curNShards,
+                av_packet->size,
                 fecPercentage,
                 additionalData * 8 / 1000,
                 accumPayloadSize * 8 / 1000,
@@ -1412,6 +1431,8 @@ namespace stream {
 
               accumTransSize = 0;
               accumPayloadSize = 0;
+              nPackets = 0;
+              nShards = 0;
           }
 #endif
 

@@ -220,6 +220,8 @@ queueDelaySbdSkew(0)
 	queueDelayMax = 0.0f;
 	queueDelayMinAvg = 0.0f;
 	queueDelayMin = 1000.0;
+
+    printf("SCREAM: isL4s:%d\n", isL4s);
 }
 
 ScreamV2Tx::~ScreamV2Tx() {
@@ -582,7 +584,7 @@ void ScreamV2Tx::incomingStandardizedFeedback(uint32_t time_ntp,
 			/*
 			* Bogus RTCP?, the SSRC is wrong anyway, Skip
 			*/
-            //printf("Stream %d not found!\n", ssrc);
+            printf("Stream %d not found!\n", ssrc);
 			return;
 		}
 

@@ -1389,7 +1389,7 @@ namespace video {
   encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
 
 	needIDR = false;
-#if 1
+#if 0
 	// SCREAM Target Bitrate
 	{
 		std::lock_guard lock { scream::GetLock() };
@@ -2307,6 +2307,7 @@ namespace video {
     session->request_idr_frame();
 
     auto packets = mail::man->queue<packet_t>(mail::video_packets);
+    bool needIDR = false;
     while (!packets->peek()) {
       bool needIDR = false;
       if (encode(1, *session, packets, nullptr, {}, needIDR)) {

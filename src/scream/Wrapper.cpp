@@ -474,22 +474,22 @@ bool SetECT(int sock, int value)
     int retVal = getsockopt(sock, IPPROTO_IP, IP_TOS,  &iptos, &toslen);
     if (retVal < 0)
     {
-        BOOST_LOG(error) << "ECN: Failed to get TOS marking on socket " << sock << ". error:" << retVal;
+        printf("ECN: ERR: Failed to get TOS marking on socket %d. err:%d\n", sock, retVal);
         iptos = 0;
     }
     else
     {
-        BOOST_LOG(info) << "ECN: Got TOS " << iptos << " before setting ECN. toslen:" << toslen << " retVal:" << retVal;
+        printf("ECN: Got TOS %d before setting ECN. toslen:%u retVal:%d\n", iptos, toslen, retVal);
     }
 
     // Set ECT on the last two bits
     iptos = (iptos & 0xFC) | value;
 
-    BOOST_LOG(info) << "ECN: Setting tos to " << iptos;
+    printf("ECN: Setting tos to %d\n", iptos);
     retVal = setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
     if (retVal < 0)
     {
-        BOOST_LOG(error) << "ECN: Not possible to set ECN bits. retVal: " << retVal;
+        printf("ECN: ERR: Not possible to set ECN bits. retVal:%d \n", retVal);
         return false;
     }
 

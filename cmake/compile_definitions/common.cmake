@@ -82,6 +82,12 @@ set(SUNSHINE_TARGET_FILES
         src/round_robin.h
         src/stat_trackers.h
         src/stat_trackers.cpp
+        src/scream/RtpQueue.cpp
+        src/scream/ScreamTx.cpp
+        src/scream/ScreamV1Tx.cpp
+        src/scream/ScreamV2Tx.cpp
+        src/scream/ScreamV2TxStream.cpp
+        src/scream/Wrapper.cpp
         ${PLATFORM_TARGET_FILES})
 
 set_source_files_properties(src/upnp.cpp PROPERTIES COMPILE_FLAGS -Wno-pedantic)

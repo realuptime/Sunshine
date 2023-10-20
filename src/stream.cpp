@@ -1371,7 +1371,7 @@ namespace stream {
 #if 1
           static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
           accumTransSize += curTransSize;
-          accumPayloadSize += int(av_packet->size); // int(payload.size())
+          accumPayloadSize += int(packet->data_size());
           nPackets++;
           nShards += curNShards;
 
@@ -1388,7 +1388,7 @@ namespace stream {
 
               const int additionalData = accumTransSize - accumPayloadSize;
               const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
-              printf("SCREAM: nsec:%zu cfgPktSize:%d BS:%d NP:%d shards:%d/%.0f%%/%d frame:%d"
+              printf("SCREAM: nsec:%zu cfgPktSize:%d BS:%d NP:%d shards:%d/%.0f%%/%d frame:%zu"
                 " fecPercentage:%d"
                 " additionalDataRate:%d + encoderRate:%d = toSendRate:%d kbps / %.1f%% addition\n"
                 ,
@@ -1399,7 +1399,7 @@ namespace stream {
                 nShards,
                 float(nShards) * 100.0f / nPackets,
                 curNShards,
-                av_packet->size,
+                packet->data_size(),
                 fecPercentage,
                 additionalData * 8 / 1000,
                 accumPayloadSize * 8 / 1000,

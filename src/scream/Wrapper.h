@@ -22,4 +22,5 @@ std::mutex &GetLock();
 bool IsLossEpoch(uint32_t ssrc);
 void StartStreaming(uint32_t ssrc, const boost::asio::ip::udp::endpoint &peer, boost::asio::ip::udp::socket &sock);
 void StopStreaming(uint32_t ssrc);
+bool SetECT(int sock, int value);
 } // namespace scream

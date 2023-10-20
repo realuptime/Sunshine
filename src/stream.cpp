@@ -73,6 +73,7 @@ using asio::ip::udp;
 using namespace std::literals;
 
 namespace stream {
+
   enum class socket_e : int {
     video,
     audio
@@ -572,23 +573,15 @@ namespace stream {
       auto pad = payload_size % blocksize != 0;
 
       auto data_shards = payload_size / blocksize + (pad ? 1 : 0);
-
-#if 0
       auto parity_shards = (data_shards * fecpercentage + 99) / 100;
 
       // increase the FEC percentage for this frame if the parity shard minimum is not met
-      if (parity_shards < minparityshards)
-      {
-        BOOST_LOG(warning) << "Increasing FEC percentage! minparityshards:"sv << minparityshards << " parity_shards:"sv << parity_shards << " data_shards:"sv << data_shards << std::endl;
-
+      if (parity_shards < minparityshards) {
         parity_shards = minparityshards;
         fecpercentage = (100 * parity_shards) / data_shards;
 
-        BOOST_LOG(warning) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
+        BOOST_LOG(verbose) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
       }
-#else
-      int parity_shards = std::max(1, int(minparityshards) - int(data_shards));
-#endif
 
       auto nr_shards = data_shards + parity_shards;
       if (nr_shards > DATA_SHARDS_MAX) {
@@ -885,9 +878,8 @@ namespace stream {
       input::passthrough(session->input, std::move(plaintext));
     });
 
-    server->map(packetTypes[IDX_RTCP], [&](session_t *session, const std::string_view &payload) {
-      //BOOST_LOG(debug) << "type [IDX_RTCP]"sv;
-      //BOOST_LOG(info) << "type [IDX_RTCP] of size "sv << payload.size();
+    server->map(0x010f, [&](session_t *session, const std::string_view &payload) {
+      //BOOST_LOG(info) << "Got RTCP of size "sv << payload.size();
 
 	  std::lock_guard lock { scream::GetLock() };
       if (payload.size() > 4)
@@ -1132,27 +1124,25 @@ namespace stream {
   }
 
   void
-  videoBroadcastThread(udp::socket &sock)
-  {
+  videoBroadcastThread(udp::socket &sock) {
     auto shutdown_event = mail::man->event<bool>(mail::broadcast_shutdown);
     auto packets = mail::man->queue<video::packet_t>(mail::video_packets);
     auto timebase = boost::posix_time::microsec_clock::universal_time();
-
-	bool firstLoop = true;
-
 
     // Video traffic is sent on this thread
     platf::adjust_thread_priority(platf::thread_priority_e::high);
 
     stat_trackers::min_max_avg_tracker<uint16_t> frame_processing_latency_tracker;
 
-	while(auto packet = packets->pop())
-	{
+    bool firstLoop = true;
+
+    while (auto packet = packets->pop()) {
       if (shutdown_event->peek()) {
         break;
       }
 
       auto session = (session_t *) packet->channel_data;
+      auto lowseq = session->video.lowseq;
 
 	  if (firstLoop)
 	  {
@@ -1163,8 +1153,6 @@ namespace stream {
 				scream::StartStreaming(VIDEO_SSRC, session->video.peer, sock);
 			}
 	  }
-
-      auto lowseq = session->video.lowseq;
 
       std::string_view payload { (char *) packet->data(), packet->data_size() };
       std::vector<uint8_t> payload_with_replacements;
@@ -1224,7 +1212,6 @@ namespace stream {
 
       // insert packet headers
       auto blocksize = session->config.packetsize + MAX_RTP_HEADER_SIZE;
-
       auto payload_blocksize = blocksize - sizeof(video_packet_raw_t);
 
       auto fecPercentage = config::stream.fec_percentage;
@@ -1251,10 +1238,6 @@ namespace stream {
         fec_blocks_begin = std::begin(fec_blocks),
         fec_blocks_end = std::begin(fec_blocks) + 1;
 
-#if 0
-      multi_fec_threshold = payload.size(); // test
-#endif
-
       auto lastBlockIndex = 0;
       if (payload.size() > multi_fec_threshold) {
         BOOST_LOG(verbose) << "Generating multiple FEC blocks"sv;
@@ -1279,8 +1262,7 @@ namespace stream {
       int curTransSize = 0;
       int curNShards = 0;
 
-      try
-      {
+      try {
         auto blockIndex = 0;
         std::for_each(fec_blocks_begin, fec_blocks_end, [&](std::string_view &current_payload) {
           auto packets = (current_payload.size() + (blocksize - 1)) / blocksize;
@@ -1307,8 +1289,7 @@ namespace stream {
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
 
           // set FEC info now that we know for sure what our percentage will be for this frame
-          for (auto x = 0; x < shards.size(); ++x)
-          {
+          for (auto x = 0; x < shards.size(); ++x) {
             auto *inspect = (video_packet_raw_t *) shards.data(x);
 
             // RTP video timestamps use a 90 KHz clock
@@ -1323,10 +1304,7 @@ namespace stream {
             inspect->rtp.header = 0x80 | FLAG_EXTENSION;
             inspect->rtp.sequenceNumber = util::endian::big<uint16_t>(lowseq + x);
             inspect->rtp.timestamp = util::endian::big<uint32_t>(timestamp);
-
-            // use SSRC 1 for video
 			inspect->rtp.ssrc = util::endian::big<uint32_t>(VIDEO_SSRC);
-			//BOOST_LOG(info) << "video ssid:"sv << inspect->rtp.ssrc;
 
             inspect->packet.multiFecBlocks = (blockIndex << 4) | lastBlockIndex;
             inspect->packet.frameIndex = packet->frame_index();
@@ -1334,6 +1312,7 @@ namespace stream {
             curTransSize += shards.blocksize;
           }
           curNShards += shards.size();
+
 #if 0
           auto peer_address = session->video.peer.address();
           auto batch_info = platf::batched_send_info_t {
@@ -1347,8 +1326,7 @@ namespace stream {
           };
 
           // Use a batched send if it's supported on this platform
-          if (!platf::send_batch(batch_info))
-		  {
+          if (!platf::send_batch(batch_info)) {
             // Batched send is not available, so send each packet individually
             BOOST_LOG(verbose) << "Falling back to unbatched send"sv;
             for (auto x = 0; x < shards.size(); ++x) {
@@ -1373,7 +1351,7 @@ namespace stream {
 				scream::NewMediaFrame(0,
 						VIDEO_SSRC,
 						(uint8_t *)shards.data(x),
-						shards.blocksize,
+						shards[x].size(),
 						lowseq + x,
 						inspect->packet.flags & FLAG_SOF);
 			}
@@ -1605,8 +1583,6 @@ namespace stream {
 		scream::RegisterNewStream(VIDEO_SSRC); // video
 	}
 
-    //ctx.video_sock.non_blocking(true);
-
     ctx.message_queue_queue = std::make_shared<message_queue_queue_t::element_type>(30);
 
     ctx.video_thread = std::thread { videoBroadcastThread, std::ref(ctx.video_sock) };
@@ -1726,37 +1702,6 @@ namespace stream {
     return -1;
   }
 
-  bool setECT(int sock, int value)
-  {
-    int iptos = 0;
-
-    // Get current TOS value
-    socklen_t toslen = sizeof(iptos);
-    int retVal = getsockopt(sock, IPPROTO_IP, IP_TOS,  &iptos, &toslen);
-    if (retVal < 0)
-    {
-	    BOOST_LOG(error) << "ECN: Failed to get TOS marking on socket " << sock << ". error:" << retVal;
-	    iptos = 0;
-    }
-    else
-    {
-	    BOOST_LOG(info) << "ECN: Got TOS " << iptos << " before setting ECN. toslen:" << toslen << " retVal:" << retVal;
-    }
-
-    // Set ECT on the last two bits
-    iptos = (iptos & 0xFC) | value;
-
-    BOOST_LOG(info) << "ECN: Setting tos to " << iptos;
-    retVal = setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
-    if (retVal < 0)
-	{
-		BOOST_LOG(error) << "ECN: Not possible to set ECN bits. retVal: " << retVal;
-		return false;
-    }
-
-    return true;
-  }
-
   void
   videoThread(session_t *session) {
     auto fg = util::fail_guard([&]() {
@@ -1771,17 +1716,15 @@ namespace stream {
       return;
     }
 
-#if 1
     // Enable QoS tagging on video traffic if requested by the client
     if (session->config.videoQosType) {
       auto address = session->video.peer.address();
       session->video.qos = platf::enable_socket_qos(ref->video_sock.native_handle(), address,
         session->video.peer.port(), platf::qos_data_type_e::video);
     }
-#endif
 
     // SET ECN bits
-    setECT((int)ref->video_sock.native_handle(), 1);
+    scream::SetECT((int)ref->video_sock.native_handle(), 1);
 
     BOOST_LOG(debug) << "Start capturing Video"sv;
     video::capture(session->mail, session->config.monitor, session);

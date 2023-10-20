@@ -22,8 +22,8 @@ extern "C" {
 #include "platform/common.h"
 #include "sync.h"
 #include "video.h"
-#include "stream.h"
 
+#include "stream.h"
 #include "scream/Wrapper.h"
 
 #ifdef _WIN32
@@ -872,21 +872,6 @@ namespace video {
       {
         { "preset"s, &config::video.sw.sw_preset },
         { "tune"s, &config::video.sw.sw_tune },
-
-#if 1 // test CBR
-        { "x264opts"s, "force-cfr=1:bitrate=6400:log=3:pass=2:stats=stats"},
-        //{ "x264opts"s, "bitrate=6400:vbv-maxrate=6400:vbv-bufsize=400:filler=1:log=3:pass=1:stats=stats"},
-        //{ "x264opts"s, "bitrate=6400:vbv-maxrate=6400:vbv-bufsize=400:filler=1:log=3:pass=1:stats=stats:qpmin=10:qpmax=51:qpstep=4:mbtree=1"},
-        //{ "x264opts"s, "bitrate=8000" },
-        //{ "x264opts"s, "bitrate=8000:filler=1:log=3" },
-        //{ "x264opts"s, "nal-hrd=cbr:force-cfr=1:bitrate=6400:vbv-maxrate=6400:vbv-bufsize=400:log=3:pass=1:stats=stats" },
-        //{ "x264opts"s, "nal-hrd=cbr:force-cfr=1:bitrate=6400:log=3:stats=stats" }, // works!
-
-        { "nal-hrd"s, "0" },
-
-        //{ "cbr"s, "1" },
-        //{ "nal-hrd"s, "cbr" },
-#endif
       },
       {},  // SDR-specific options
       {},  // HDR-specific options
@@ -1288,8 +1273,7 @@ namespace video {
   }
 
   int
-<<<<<<< HEAD
-  encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
+  encode_avcodec(int64_t frame_nr, avcodec_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
     auto &frame = session.device->frame;
     frame->pts = frame_nr;
 
@@ -1297,58 +1281,6 @@ namespace video {
 
     auto &sps = session.sps;
     auto &vps = session.vps;
-
-	needIDR = false;
-
-	// SCREAM Target Bitrate
-	{
-		std::lock_guard lock { scream::GetLock() };
-
-#if 1
-        static time_t lastTime = time(0);
-        time_t now = time(0);
-        if (now != lastTime)
-        {
-            lastTime = now;
-            float rate = scream::GetTargetBitrate(VIDEO_SSRC);
-            if (rate > 0.0f)
-            {
-                const auto ctxp = ctx.get();
-
-                //const float rateMultiply = 0.5f;
-                //const float rateMultiply = 0.99f;
-                //const float rateMultiply = 0.99f;
-                const float rateMultiply = 1.0f;
-                rate *= rateMultiply;
-
-                rate = std::max(rate - 2000000.0f, 200000.0f); // substract 1400 Mbps for video + 400kbps for audio
-
-                int iRate = rate;
-                //if (ctxp->bit_rate != iRate)
-                {
-                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << (ctxp->bit_rate / 1000) << " -> " << (iRate / 1000);
-                    ctxp->bit_rate = iRate;
-                    ctxp->rc_min_rate = iRate;
-                    ctxp->rc_max_rate = iRate + 1001;
-
-#if 1
-                    ctxp->rc_buffer_size = iRate / 60;
-                    //ctxp->rc_buffer_size = rate / ((60.0f * 10) / 15);
-                    //ctxp->rc_buffer_size = iRate;
-                    //ctxp->rc_buffer_size = (iRate / 60.0) * 3.0f;
-#endif
-                }
-            }
-        }
-
-		if (scream::IsLossEpoch(VIDEO_SSRC))
-		{
-			// Force IDR
-			needIDR = true;
-		    //BOOST_LOG(info) << "SCREAM: IDR request";
-		}
-#endif
-	}
 
     // send the frame to the encoder
     auto ret = avcodec_send_frame(ctx.get(), frame);
@@ -1433,7 +1365,80 @@ namespace video {
   }
 
   int
-  encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+  encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
+    auto encoded_frame = session.encode_frame(frame_nr);
+    if (encoded_frame.data.empty()) {
+      BOOST_LOG(error) << "NvENC returned empty packet";
+      return -1;
+    }
+
+    if (frame_nr != encoded_frame.frame_index) {
+      BOOST_LOG(error) << "NvENC frame index mismatch " << frame_nr << " " << encoded_frame.frame_index;
+    }
+
+    auto packet = std::make_unique<packet_raw_generic>(std::move(encoded_frame.data), encoded_frame.frame_index, encoded_frame.idr);
+    packet->channel_data = channel_data;
+    packet->after_ref_frame_invalidation = encoded_frame.after_ref_frame_invalidation;
+    packet->frame_timestamp = frame_timestamp;
+    packets->raise(std::move(packet));
+
+    return 0;
+  }
+
+  int
+  encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
+
+	needIDR = false;
+#if 1
+	// SCREAM Target Bitrate
+	{
+		std::lock_guard lock { scream::GetLock() };
+
+        static time_t lastTime = time(0);
+        time_t now = time(0);
+        if (now != lastTime)
+        {
+            lastTime = now;
+            float rate = scream::GetTargetBitrate(VIDEO_SSRC);
+            if (rate > 0.0f)
+            {
+                const auto ctxp = ctx.get();
+
+                //const float rateMultiply = 0.5f;
+                //const float rateMultiply = 0.99f;
+                //const float rateMultiply = 0.99f;
+                const float rateMultiply = 1.0f;
+                rate *= rateMultiply;
+
+                rate = std::max(rate - 2000000.0f, 200000.0f); // substract 1400 Mbps for video + 400kbps for audio
+
+                int iRate = rate;
+                //if (ctxp->bit_rate != iRate)
+                {
+                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << (ctxp->bit_rate / 1000) << " -> " << (iRate / 1000);
+                    ctxp->bit_rate = iRate;
+                    ctxp->rc_min_rate = iRate;
+                    ctxp->rc_max_rate = iRate + 1001;
+
+#if 1
+                    ctxp->rc_buffer_size = iRate / 60;
+                    //ctxp->rc_buffer_size = rate / ((60.0f * 10) / 15);
+                    //ctxp->rc_buffer_size = iRate;
+                    //ctxp->rc_buffer_size = (iRate / 60.0) * 3.0f;
+#endif
+                }
+            }
+        }
+
+		if (scream::IsLossEpoch(VIDEO_SSRC))
+		{
+			// Force IDR
+			needIDR = true;
+		    //BOOST_LOG(info) << "SCREAM: IDR request";
+		}
+	}
+#endif
+
     if (auto avcodec_session = dynamic_cast<avcodec_encode_session_t *>(&session)) {
       return encode_avcodec(frame_nr, *avcodec_session, packets, channel_data, frame_timestamp);
     }
@@ -1622,18 +1627,11 @@ namespace video {
       handle_option(option);
     }
 
-    BOOST_LOG(info)
-      << "VIDEO: encoder.cbr:" << video_format[encoder_t::CBR] << '\n'
-      << " config.vbr:" << bool(encoder.flags & CBR_WITH_VBR) << '\n'
-      << " config.bitrate:" << config.bitrate << '\n'
-      ;
-
     if (video_format[encoder_t::CBR]) {
       auto bitrate = config.bitrate * 1000;
       ctx->rc_max_rate = bitrate;
       ctx->bit_rate = bitrate;
 
-#if 1 // x264 CBR test
       if (encoder.flags & CBR_WITH_VBR) {
         // Ensure rc_max_bitrate != bit_rate to force VBR mode
         ctx->bit_rate--;
@@ -1658,7 +1656,6 @@ namespace video {
           ctx->rc_buffer_size = bitrate / config.framerate;
         }
       }
-#endif
     }
     else if (video_format.qp) {
       handle_option(*video_format.qp);
@@ -2723,7 +2720,19 @@ namespace video {
       return -1;
     }
 
-    BOOST_LOG(info) << "Successfully created CUDA device! status:" << status;
+    return hw_device_buf;
+  }
+
+  util::Either<avcodec_buffer_t, int>
+  vt_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
+    avcodec_buffer_t hw_device_buf;
+
+    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nullptr, nullptr, 0);
+    if (status < 0) {
+      char string[AV_ERROR_MAX_STRING_SIZE];
+      BOOST_LOG(error) << "Failed to create a VideoToolbox device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
+      return -1;
+    }
 
     return hw_device_buf;
   }

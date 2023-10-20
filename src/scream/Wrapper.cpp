@@ -465,4 +465,36 @@ void StopStreaming(uint32_t ssrc)
 	}
 }
 
+bool SetECT(int sock, int value)
+{
+    int iptos = 0;
+
+    // Get current TOS value
+    socklen_t toslen = sizeof(iptos);
+    int retVal = getsockopt(sock, IPPROTO_IP, IP_TOS,  &iptos, &toslen);
+    if (retVal < 0)
+    {
+        BOOST_LOG(error) << "ECN: Failed to get TOS marking on socket " << sock << ". error:" << retVal;
+        iptos = 0;
+    }
+    else
+    {
+        BOOST_LOG(info) << "ECN: Got TOS " << iptos << " before setting ECN. toslen:" << toslen << " retVal:" << retVal;
+    }
+
+    // Set ECT on the last two bits
+    iptos = (iptos & 0xFC) | value;
+
+    BOOST_LOG(info) << "ECN: Setting tos to " << iptos;
+    retVal = setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
+    if (retVal < 0)
+    {
+        BOOST_LOG(error) << "ECN: Not possible to set ECN bits. retVal: " << retVal;
+        return false;
+    }
+
+    return true;
+}
+
+
 } // namespace scream

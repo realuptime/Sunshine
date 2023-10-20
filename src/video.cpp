@@ -2723,6 +2723,8 @@ namespace video {
       return -1;
     }
 
+    BOOST_LOG(info) << "Successfully created CUDA device! status:" << status;
+
     return hw_device_buf;
   }
 

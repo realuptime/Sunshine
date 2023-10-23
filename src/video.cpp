@@ -1389,7 +1389,7 @@ namespace video {
   encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
 
 	needIDR = false;
-#if 0
+#if 1
 	// SCREAM Target Bitrate
 	{
 		std::lock_guard lock { scream::GetLock() };
@@ -1399,33 +1399,52 @@ namespace video {
         if (now != lastTime)
         {
             lastTime = now;
-            float rate = scream::GetTargetBitrate(VIDEO_SSRC);
-            if (rate > 0.0f)
+            float rateToSet = scream::GetTargetBitrate(VIDEO_SSRC);
+            if (rateToSet > 0.0f)
             {
-                const auto ctxp = ctx.get();
-
                 //const float rateMultiply = 0.5f;
                 //const float rateMultiply = 0.99f;
                 //const float rateMultiply = 0.99f;
                 const float rateMultiply = 1.0f;
-                rate *= rateMultiply;
+                rateToSet *= rateMultiply;
 
-                rate = std::max(rate - 2000000.0f, 200000.0f); // substract 1400 Mbps for video + 400kbps for audio
+                rateToSet = std::max(rateToSet - 2000000.0f, 200000.0f); // substract 1400 Mbps for video + 400kbps for audio
 
-                int iRate = rate;
-                //if (ctxp->bit_rate != iRate)
+                int iRateToSet = rateToSet;
+                int iEncoderRate = 0;
+
+                avcodec_encode_session_t *avcodec_session = dynamic_cast<avcodec_encode_session_t *>(&session);
+                nvenc_encode_session_t *nvenc_session = avcodec_session ? nullptr : dynamic_cast<nvenc_encode_session_t *>(&session);
+                if (avcodec_session) {
+                    iEncoderRate = avcodec_session->avcodec_ctx->bit_rate;
+                }
+                else if (nvenc_session) {
+                    // TODO
+                    //iEncoderRate = nvenc_session->nvenc->;
+                }
+
+                //if (iEncoderRate != iRateToSet)
                 {
-                    BOOST_LOG(info) << "DYNBITRATE: ctx->bit_rate: " << (ctxp->bit_rate / 1000) << " -> " << (iRate / 1000);
-                    ctxp->bit_rate = iRate;
-                    ctxp->rc_min_rate = iRate;
-                    ctxp->rc_max_rate = iRate + 1001;
+                    BOOST_LOG(info) << "DYNBITRATE: encoder rate: " << (iEncoderRate / 1000) << " -> " << (iRateToSet / 1000);
+                    if (avcodec_session)
+                    {
+                        auto ctxp = avcodec_session->avcodec_ctx.get();
+
+                        ctxp->bit_rate = iRateToSet;
+                        ctxp->rc_min_rate = iRateToSet;
+                        ctxp->rc_max_rate = iRateToSet + 1001;
 
 #if 1
-                    ctxp->rc_buffer_size = iRate / 60;
-                    //ctxp->rc_buffer_size = rate / ((60.0f * 10) / 15);
-                    //ctxp->rc_buffer_size = iRate;
-                    //ctxp->rc_buffer_size = (iRate / 60.0) * 3.0f;
+                        //ctxp->rc_buffer_size = iRateToSet / 60;
+                        //ctxp->rc_buffer_size = rateToSet / ((60.0f * 10) / 15);
+                        ctxp->rc_buffer_size = iRateToSet;
+                        //ctxp->rc_buffer_size = (iRateToSet / 60.0) * 3.0f;
 #endif
+                    }
+                    else if (nvenc_session)
+                    {
+                        // TODO
+                    }
                 }
             }
         }

@@ -573,6 +573,8 @@ namespace stream {
       auto pad = payload_size % blocksize != 0;
 
       auto data_shards = payload_size / blocksize + (pad ? 1 : 0);
+
+#if 0
       auto parity_shards = (data_shards * fecpercentage + 99) / 100;
 
       // increase the FEC percentage for this frame if the parity shard minimum is not met
@@ -582,6 +584,10 @@ namespace stream {
 
         BOOST_LOG(verbose) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
       }
+#else
+      int parity_shards = std::max(1, int(minparityshards) - int(data_shards));
+      fecpercentage = (100 * parity_shards) / data_shards;
+#endif
 
       auto nr_shards = data_shards + parity_shards;
       if (nr_shards > DATA_SHARDS_MAX) {
@@ -882,8 +888,9 @@ namespace stream {
       //BOOST_LOG(info) << "Got RTCP of size "sv << payload.size();
 
 	  std::lock_guard lock { scream::GetLock() };
-      if (payload.size() > 4)
-          scream::ProcessRTCP(const_cast<unsigned char *>(reinterpret_cast<const unsigned char *>(payload.data()) + 4), payload.size() - 4);
+      const int offset = 0; // 4
+      if (payload.size() > offset)
+          scream::ProcessRTCP(const_cast<unsigned char *>(reinterpret_cast<const unsigned char *>(payload.data()) + offset), payload.size() - offset);
     });
 
     server->map(packetTypes[IDX_ENCRYPTED], [server](session_t *session, const std::string_view &payload) {

@@ -7,8 +7,7 @@
 #include "src/stat_trackers.h"
 #include "src/video.h"
 
-//#include <ffnvcodec/nvEncodeAPI.h>
-#include "inc.h"
+#include "nvenc_inc.h"
 
 namespace nvenc {
 

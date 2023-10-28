@@ -23,6 +23,7 @@
 #include "cuda_resize.h"
 #include "cuda_utility.h"
 #include "cuda_math.h"
+#include "cuda_mapped_memory.h"
 
 #include "cuda.h"
 

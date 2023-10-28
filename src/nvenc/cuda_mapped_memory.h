@@ -105,7 +105,8 @@ inline bool cudaAllocMapped( void** ptr, size_t size )
  * @returns `true` if the allocation succeeded, `false` otherwise.
  * @ingroup cudaMemory
  */
-inline bool cudaAllocMapped( void** ptr, size_t width, size_t height, imageFormat format )
+//inline 
+bool cudaAllocMapped( void** ptr, size_t width, size_t height, imageFormat format )
 {
 	return cudaAllocMapped(ptr, imageFormatSize(format, width, height));
 }
@@ -186,6 +187,16 @@ template<typename T> inline bool cudaAllocMapped( T** ptr, const int2& dims )
 template<typename T> inline bool cudaAllocMapped( T** ptr, size_t size )
 {
 	return cudaAllocMapped((void**)ptr, size);
+}
+
+
+cudaError_t freeCudaCPU(void *ptr)
+{
+    return cudaFreeHost(ptr);
+}
+cudaError_t freeCudaGPU(void *ptr)
+{
+    return cudaFree(ptr);
 }
 
 #endif

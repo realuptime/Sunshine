@@ -28,8 +28,7 @@
 
 #ifndef __APPLE__
   // For NVENC legacy constants
-  //#include <ffnvcodec/nvEncodeAPI.h>
-  #include "nvenc/inc.h"
+  #include "nvenc/nvenc_inc.h"
 #endif
 
 namespace fs = std::filesystem;

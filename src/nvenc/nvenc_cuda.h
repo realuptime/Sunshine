@@ -21,7 +21,6 @@ namespace nvenc
 
   bool transferToDevice(platf::img_t &img);
   bool register_deviceptr(void *devicePtr); // CUdeviceptr
-  bool register_cudaarray(uint32_t width, uint32_t height);
   bool unregister_resource();
 
   private:
@@ -36,9 +35,9 @@ namespace nvenc
     CUdeviceptr alloc_pitched(uint32_t width, uint32_t height, size_t &pitch, const char *msg);
 
     CUcontext cuda_context;
-    CUdeviceptr cuda_deviceptr, cuda_resized_deviceptr;
+    void *encoder_deviceptr, *input_deviceptr;
     void *libHandle;
-    size_t cudaPitch, cudaResizedPitch;
+    size_t encoderDevicePtrPitch;
 
     uint32_t cudaWidth, cudaHeight;
 

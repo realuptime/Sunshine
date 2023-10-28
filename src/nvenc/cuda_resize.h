@@ -107,6 +107,8 @@ enum cudaDataFormat
 	FORMAT_DEFAULT = FORMAT_HWC
 };
 
+#ifdef __CUDACC__
+
 /**
  * Rescale a uint8 grayscale image on the GPU.
  * To use bilinear filtering for upscaling, set filter to FILTER_LINEAR.
@@ -172,6 +174,9 @@ cudaError_t cudaResize( uchar4* input,  size_t inputWidth,  size_t inputHeight,
 cudaError_t cudaResize( float4* input,  size_t inputWidth,  size_t inputHeight,
 				    float4* output, size_t outputWidth, size_t outputHeight,
 				    cudaFilterMode filter=FILTER_POINT );
+#else
+typedef CUresult cudaError_t;
+#endif // __CUDACC__
 
 /**
  * Rescale an image on the GPU (supports grayscale, RGB/BGR, RGBA/BGRA)

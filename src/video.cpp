@@ -1855,7 +1855,7 @@ namespace video {
     }
     else if (dynamic_cast<platf::nvenc_encode_device_t *>(encode_device.get())) {
       video::config_t config1 = config;
-#if 1 // TEST
+#if 0 // TEST
       config1.width = 2560;
       config1.height = 1600;
 #endif

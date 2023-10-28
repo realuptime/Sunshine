@@ -5,8 +5,7 @@
 #include <bitset>
 
 #include <NvFBC.h>
-//#include <ffnvcodec/dynlink_loader.h>
-#include "src/nvenc/inc.h"
+#include "src/nvenc/nvenc_inc.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>

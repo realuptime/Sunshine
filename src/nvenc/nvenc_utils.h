@@ -9,8 +9,7 @@
 #include "src/platform/common.h"
 #include "src/video_colorspace.h"
 
-//#include <ffnvcodec/nvEncodeAPI.h>
-#include "inc.h"
+#include "nvenc_inc.h"
 
 namespace nvenc {
 

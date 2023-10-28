@@ -27,6 +27,9 @@
 #include "vaapi.h"
 #include "x11grab.h"
 
+#include "src/nvenc/nvenc_utils.h"
+#include "src/nvenc/nvenc_cuda.h"
+
 using namespace std::literals;
 
 namespace platf {
@@ -380,6 +383,47 @@ namespace platf {
     }
   }
 
+#if 1
+  class cuda_nvenc_encode_device_t: public platf::nvenc_encode_device_t
+  {
+  public:
+    bool
+    init_device(CUcontext cu_context)
+    {
+      nvenc_cuda = std::make_unique<nvenc::nvenc_cuda>(cu_context);
+      nvenc = nvenc_cuda.get();
+
+      return true;
+    }
+
+    bool
+    init_encoder(const ::video::config_t &client_config, const ::video::sunshine_colorspace_t &colorspace) override {
+      if (!nvenc_cuda) return false;
+
+      nvenc::nvenc_config nvenc_config;
+      auto nvenc_colorspace = nvenc::nvenc_colorspace_from_sunshine_colorspace(colorspace);
+      return nvenc_cuda->create_encoder(nvenc_config, client_config, nvenc_colorspace, NV_ENC_BUFFER_FORMAT_ARGB);
+    }
+
+    int
+    convert(platf::img_t &img) override
+    {
+      if (!nvenc_cuda) return 1;
+      if (!nvenc_cuda->transferToDevice(img))
+      {
+          BOOST_LOG(error) << "CUDA: transferToDevice failed!";
+          return 1;
+      }
+      return 0;
+    }
+
+private:
+    // d3d_base_encode_device base;
+    std::unique_ptr<nvenc::nvenc_cuda> nvenc_cuda;
+  };
+#endif // cuda_nvenc_encode_device_t
+
+
   struct x11_attr_t: public display_t {
     std::chrono::nanoseconds delay;
 
@@ -388,6 +432,8 @@ namespace platf {
     XWindowAttributes xattr;
 
     mem_type_e mem_type;
+
+    CUcontext cudaContext;
 
     /**
      * Last X (NOT the streamed monitor!) size.
@@ -463,6 +509,8 @@ namespace platf {
 
       env_width = xattr.width;
       env_height = xattr.height;
+
+      cudaContext = nvenc::init_cuda();
 
       return 0;
     }
@@ -565,8 +613,25 @@ namespace platf {
       }
 #endif
 
+      BOOST_LOG(info) << "CUDA: x11grab::make_avcodec_encode_device";
       return std::make_unique<avcodec_encode_device_t>();
     }
+
+#if 1
+      std::unique_ptr<platf::nvenc_encode_device_t>
+      make_nvenc_encode_device(platf::pix_fmt_e pix_fmt) override
+      {
+          BOOST_LOG(info) << "make_nvenc_encode_device called!";
+          auto device = std::make_unique<cuda_nvenc_encode_device_t>();
+          if (!device->init_device(cudaContext))
+          {
+              BOOST_LOG(error) << "make_nvenc_encode_device.init_device failed "sv;
+              return nullptr;
+          }
+
+          return device;
+      }
+#endif
 
     int
     dummy_img(img_t *img) override {

@@ -7,7 +7,8 @@
 #include "src/stat_trackers.h"
 #include "src/video.h"
 
-#include <ffnvcodec/nvEncodeAPI.h>
+//#include <ffnvcodec/nvEncodeAPI.h>
+#include "inc.h"
 
 namespace nvenc {
 
@@ -65,6 +66,8 @@ namespace nvenc {
     void *async_event_handle = nullptr;
 
     std::string last_error_string;
+
+    int test = 0;
 
   private:
     NV_ENC_OUTPUT_PTR output_bitstream = nullptr;

@@ -93,6 +93,7 @@ if(CUDA_FOUND)
     list(APPEND PLATFORM_TARGET_FILES
             src/platform/linux/cuda.cu
             src/platform/linux/cuda.cpp
+            src/platform/linux/cuda_resize.cu
             third-party/nvfbc/NvFBC.h)
 
     add_compile_definitions(SUNSHINE_BUILD_CUDA)

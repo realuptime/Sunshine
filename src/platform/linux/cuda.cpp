@@ -5,7 +5,8 @@
 #include <bitset>
 
 #include <NvFBC.h>
-#include <ffnvcodec/dynlink_loader.h>
+//#include <ffnvcodec/dynlink_loader.h>
+#include "src/nvenc/inc.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -20,6 +21,10 @@ extern "C" {
 #include "src/video.h"
 #include "wayland.h"
 
+#include "src/nvenc/nvenc_config.h"
+#include "src/nvenc/nvenc_cuda.h"
+#include "src/nvenc/nvenc_utils.h"
+
 #define SUNSHINE_STRINGVIEW_HELPER(x) x##sv
 #define SUNSHINE_STRINGVIEW(x) SUNSHINE_STRINGVIEW_HELPER(x)
 
@@ -33,6 +38,8 @@ using namespace std::literals;
 namespace cuda {
   constexpr auto cudaDevAttrMaxThreadsPerBlock = (CUdevice_attribute) 1;
   constexpr auto cudaDevAttrMaxThreadsPerMultiProcessor = (CUdevice_attribute) 39;
+
+  CUcontext cu_context = 0;
 
   void
   pass_error(const std::string_view &sv, const char *name, const char *description) {
@@ -57,7 +64,7 @@ namespace cuda {
       cdf->cuGetErrorName(result, &name);
       cdf->cuGetErrorString(result, &description);
 
-      BOOST_LOG(error) << sv << name << ':' << description;
+      BOOST_LOG(error) << sv << " result:" << result << name << ':' << description;
       return -1;
     }
 
@@ -83,7 +90,17 @@ namespace cuda {
       return -1;
     }
 
+    if (cu_context)
+        return 0;
+
     CU_CHECK(cdf->cuInit(0), "Couldn't initialize cuda");
+
+    CUdevice dev;
+    CU_CHECK(cdf->cuDeviceGet(&dev, 0), "cuDeviceGet failed");
+    BOOST_LOG(info) << "CUDA dev:" << dev;
+
+    CU_CHECK(cdf->cuCtxCreate(&cu_context, 0, dev), "cuCtxCreate failed");
+    BOOST_LOG(info) << "CUDA context:" << cu_context;
 
     return 0;
   }
@@ -245,6 +262,85 @@ namespace cuda {
     return cuda;
   }
 
+    // TEST
+#if 1
+  class cuda_nvenc_encode_device_t: public platf::nvenc_encode_device_t
+  {
+  public:
+    bool
+    init_device(/*display_t &display,*/ CUcontext cu_context) {
+      /*
+
+      buffer_format = nvenc::nvenc_format_from_sunshine_format(pix_fmt);
+      if (buffer_format == NV_ENC_BUFFER_FORMAT_UNDEFINED) {
+        BOOST_LOG(error) << "Unexpected pixel format for NvENC ["sv << from_pix_fmt(pix_fmt) << ']';
+        return false;
+      }
+
+      if (base.init(display, adapter_p, pix_fmt)) return false;
+      // base.apply_colorspace(colorspace);
+
+      nvenc_d3d = std::make_unique<nvenc::nvenc_d3d11>(base.device.get());
+      nvenc = nvenc_d3d.get();
+      */
+
+      //pix_fmt_e pix_fmt = (pix_fmt_e)pix_fmti;
+
+      nvenc_cuda = std::make_unique<nvenc::nvenc_cuda>(cu_context);
+      nvenc = nvenc_cuda.get();
+
+      return true;
+    }
+
+    bool
+    init_encoder(const ::video::config_t &client_config, const ::video::sunshine_colorspace_t &colorspace) override {
+      if (!nvenc_cuda) return false;
+
+      nvenc::nvenc_config nvenc_config;
+      auto nvenc_colorspace = nvenc::nvenc_colorspace_from_sunshine_colorspace(colorspace);
+      return nvenc_cuda->create_encoder(nvenc_config, client_config, nvenc_colorspace, NV_ENC_BUFFER_FORMAT_ARGB);
+    }
+
+    int
+    convert(platf::img_t &img_base) override
+    {
+      if (!nvenc_cuda) return 1;
+
+#if 0
+      auto &img = (display_cuda_t::cuda_img_t &) img_base;
+
+      if (img.cuda_array) {
+        cudaError_t cuda_error;
+        // TODO: from format
+        cuda_error = cudaMemcpy2DArrayToArray(nvenc_cuda->get_cuda_array(), 0, 0, img.cuda_array, 0, 0, img.width * 4, img.height);
+        if (cuda_error != cudaSuccess) return 1;
+
+        // REMOVE THIS!
+        /*
+        auto cuda_resource = img.cuda_resource.get();
+        cuda_error = cudaGraphicsUnmapResources(1, &cuda_resource, 0);
+        if (cuda_error != cudaSuccess) return 1;
+        img.cuda_resource_mapped = false;
+        img.cuda_array = nullptr;
+        */
+      }
+
+      return 0;
+#else
+      //return base.convert(img_base);
+      return 0;
+#endif
+    }
+
+  private:
+    // d3d_base_encode_device base;
+    std::unique_ptr<nvenc::nvenc_cuda> nvenc_cuda;
+    // std::shared_ptr<platf::img_t> last_img;
+    // NV_ENC_BUFFER_FORMAT buffer_format = NV_ENC_BUFFER_FORMAT_UNDEFINED;
+  };
+
+#endif
+
   namespace nvfbc {
     static PNVFBCCREATEINSTANCE createInstance {};
     static NVFBC_API_FUNCTION_LIST func { NVFBC_VERSION };
@@ -263,6 +359,7 @@ namespace cuda {
 
       if (!handle) {
         handle = dyn::handle({ "libnvidia-fbc.so.1", "libnvidia-fbc.so" });
+        //handle = dyn::handle({ "libnvidia-fbc.so.510.68.02", "libnvidia-fbc.so.510.68.02" });
         if (!handle) {
           return -1;
         }
@@ -373,9 +470,11 @@ namespace cuda {
       }
 
       int
-      capture(NVFBC_CREATE_CAPTURE_SESSION_PARAMS &capture_params) {
-        if (func.nvFBCCreateCaptureSession(handle, &capture_params)) {
-          BOOST_LOG(error) << "Failed to start capture session: "sv << last_error();
+      capture(NVFBC_CREATE_CAPTURE_SESSION_PARAMS &capture_params)
+      {
+          NVFBCSTATUS status = func.nvFBCCreateCaptureSession(handle, &capture_params);
+        if (status) {
+          BOOST_LOG(error) << "Failed to start capture session: "sv << last_error() << ". status:" << status;
           return -1;
         }
 
@@ -386,6 +485,7 @@ namespace cuda {
           NVFBC_BUFFER_FORMAT_BGRA,
         };
 
+        BOOST_LOG(info) << "CUDA: nvFBCToCudaSetUp capture";
         if (func.nvFBCToCudaSetUp(handle, &setup_params)) {
           BOOST_LOG(error) << "Failed to setup cuda interop with nvFBC: "sv << last_error();
           return -1;
@@ -475,8 +575,9 @@ namespace cuda {
 
         delay = std::chrono::nanoseconds { 1s } / config.framerate;
 
-        capture_params = NVFBC_CREATE_CAPTURE_SESSION_PARAMS { NVFBC_CREATE_CAPTURE_SESSION_PARAMS_VER };
+        capture_params = NVFBC_CREATE_CAPTURE_SESSION_PARAMS { 0 };
 
+        capture_params.dwVersion = NVFBC_CREATE_CAPTURE_SESSION_PARAMS_VER;
         capture_params.eCaptureType = NVFBC_CAPTURE_SHARED_CUDA;
         capture_params.bDisableAutoModesetRecovery = nv_bool(true);
 
@@ -601,6 +702,8 @@ namespace cuda {
 
           // Direct Capture may fail the first few times, even if it's possible
           for (int x = 0; x < 3; ++x) {
+            //BOOST_LOG(info) << "CUDA: nvFBCToCudaGrabFrame reinit";
+            printf("CUDA: nvFBCToCudaGrabFrame reinit\n");
             if (auto status = func.nvFBCToCudaGrabFrame(handle.handle, &grab)) {
               if (status == NVFBC_ERR_MUST_RECREATE) {
                 return platf::capture_e::reinit;
@@ -654,6 +757,8 @@ namespace cuda {
           (std::uint32_t) timeout.count(),
         };
 
+        //BOOST_LOG(info) << "CUDA: nvFBCToCudaGrabFrame snapshot";
+        printf("CUDA: nvFBCToCudaGrabFrame snapshot\n");
         if (auto status = func.nvFBCToCudaGrabFrame(handle.handle, &grab)) {
           if (status == NVFBC_ERR_MUST_RECREATE) {
             return platf::capture_e::reinit;
@@ -676,9 +781,25 @@ namespace cuda {
       }
 
       std::unique_ptr<platf::avcodec_encode_device_t>
-      make_avcodec_encode_device(platf::pix_fmt_e pix_fmt) {
+      make_avcodec_encode_device(platf::pix_fmt_e pix_fmt) override {
         return ::cuda::make_avcodec_encode_device(width, height, true);
       }
+
+#if 1 // TEST
+      std::unique_ptr<platf::nvenc_encode_device_t>
+      make_nvenc_encode_device(platf::pix_fmt_e pix_fmt) override
+      {
+          BOOST_LOG(info) << "make_nvenc_encode_device called!";
+          auto device = std::make_unique<cuda_nvenc_encode_device_t>();
+          if (!device->init_device(cu_context))
+          {
+              BOOST_LOG(error) << "make_nvenc_encode_device.init_device failed "sv;
+              return nullptr;
+          }
+
+          return device;
+      }
+#endif
 
       std::shared_ptr<platf::img_t>
       alloc_img() override {

@@ -36,6 +36,8 @@ namespace nvenc {
   nvenc_colorspace_from_sunshine_colorspace(const video::sunshine_colorspace_t &sunshine_colorspace) {
     nvenc_colorspace_t colorspace;
 
+// TODO
+#ifdef SUPPORT_AV1
     switch (sunshine_colorspace.colorspace) {
       case video::colorspace_e::rec601:
         // Rec. 601
@@ -67,6 +69,7 @@ namespace nvenc {
         colorspace.matrix = NV_ENC_VUI_MATRIX_COEFFS_BT2020_NCL;
         break;
     }
+#endif
 
     colorspace.full_range = sunshine_colorspace.full_range;
 

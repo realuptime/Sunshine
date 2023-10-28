@@ -36,6 +36,8 @@
   #define SUNSHINE_GNUC_EXTENSION
 #endif
 
+#undef SUNSHINE_BUILD_CUDA // TEST
+
 using namespace std::literals;
 namespace fs = std::filesystem;
 namespace bp = boost::process;
@@ -781,6 +783,7 @@ namespace platf {
       return nullptr;
     }
 
+    BOOST_LOG(info) << "GL: gladLoaderLoadEGL";
     if (!gladLoaderLoadEGL(EGL_NO_DISPLAY) || !eglGetPlatformDisplay) {
       BOOST_LOG(warning) << "Couldn't load EGL library"sv;
     }

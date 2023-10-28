@@ -568,6 +568,47 @@ namespace video {
   auto capture_thread_async = safe::make_shared<capture_thread_async_ctx_t>(start_capture_async, end_capture_async);
   auto capture_thread_sync = safe::make_shared<capture_thread_sync_ctx_t>(start_capture_sync, end_capture_sync);
 
+#if 1 // TEST
+  static encoder_t nvenc_standalone {
+    "nvenc-standalone"sv,
+    std::make_unique<encoder_platform_formats_nvenc>(
+      platf::mem_type_e::cuda,
+      platf::pix_fmt_e::nv12, platf::pix_fmt_e::p010),
+    {
+      // Common options
+      {},
+      // SDR-specific options
+      {},
+      // HDR-specific options
+      {},
+      std::nullopt,  // QP
+      "av1_nvenc-standalone"s,
+    },
+    {
+      // Common options
+      {},
+      // SDR-specific options
+      {},
+      // HDR-specific options
+      {},
+      std::nullopt,  // QP
+      "hevc_nvenc-standalone"s,
+    },
+    {
+      // Common options
+      {},
+      // SDR-specific options
+      {},
+      // HDR-specific options
+      {},
+      std::nullopt,  // QP
+      "h264_nvenc-standalone"s,
+    },
+    H264_ONLY | PARALLEL_ENCODING | REF_FRAMES_INVALIDATION  // flags
+  };
+
+#endif
+
 #ifdef _WIN32
   static encoder_t nvenc {
     "nvenc"sv,
@@ -980,6 +1021,9 @@ namespace video {
 #endif
 
   static const std::vector<encoder_t *> encoders {
+    &nvenc_standalone,
+
+#if 0
 #ifndef __APPLE__
     &nvenc,
 #endif
@@ -994,6 +1038,7 @@ namespace video {
     &videotoolbox,
 #endif
     &software
+#endif
   };
 
   static encoder_t *chosen_encoder;
@@ -1389,7 +1434,7 @@ namespace video {
   encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
 
 	needIDR = false;
-#if 1
+#if 0
 	// SCREAM Target Bitrate
 	{
 		std::lock_guard lock { scream::GetLock() };
@@ -1803,13 +1848,19 @@ namespace video {
       BOOST_LOG(info) << "Color range: ["sv << (encode_device->colorspace.full_range ? "JPEG"sv : "MPEG"sv) << ']';
     }
 
+
     if (dynamic_cast<platf::avcodec_encode_device_t *>(encode_device.get())) {
       auto avcodec_encode_device = boost::dynamic_pointer_cast<platf::avcodec_encode_device_t>(std::move(encode_device));
       return make_avcodec_encode_session(disp, encoder, config, width, height, std::move(avcodec_encode_device));
     }
     else if (dynamic_cast<platf::nvenc_encode_device_t *>(encode_device.get())) {
+      video::config_t config1 = config;
+#if 0 // TEST
+      config1.width = 2560;
+      config1.height = 1600;
+#endif
       auto nvenc_encode_device = boost::dynamic_pointer_cast<platf::nvenc_encode_device_t>(std::move(encode_device));
-      return make_nvenc_encode_session(config, std::move(nvenc_encode_device));
+      return make_nvenc_encode_session(config1, std::move(nvenc_encode_device));
     }
 
     return nullptr;
@@ -1941,6 +1992,7 @@ namespace video {
       result = disp.make_avcodec_encode_device(pix_fmt);
     }
     else if (dynamic_cast<const encoder_platform_formats_nvenc *>(encoder.platform_formats.get())) {
+      BOOST_LOG(info) << "Calling disp.make_nvenc_encode_device ...";
       result = disp.make_nvenc_encode_device(pix_fmt);
     }
 
@@ -2302,16 +2354,19 @@ namespace video {
   validate_config(std::shared_ptr<platf::display_t> &disp, const encoder_t &encoder, const config_t &config) {
     reset_display(disp, encoder.platform_formats->dev_type, config::video.output_name, config);
     if (!disp) {
+      BOOST_LOG(error) << "reset_display failed";
       return -1;
     }
 
     auto encode_device = make_encode_device(*disp, encoder, config);
     if (!encode_device) {
+      BOOST_LOG(error) << "make_encode_device failed";
       return -1;
     }
 
     auto session = make_encode_session(disp.get(), encoder, config, disp->width, disp->height, std::move(encode_device));
     if (!session) {
+      BOOST_LOG(error) << "make_encode_session failed";
       return -1;
     }
 
@@ -2319,6 +2374,7 @@ namespace video {
       // Image buffers are large, so we use a separate scope to free it immediately after convert()
       auto img = disp->alloc_img();
       if (!img || disp->dummy_img(img.get()) || session->convert(*img)) {
+        BOOST_LOG(error) << "convert failed";
         return -1;
       }
     }
@@ -2330,6 +2386,7 @@ namespace video {
     while (!packets->peek()) {
       bool needIDR = false;
       if (encode(1, *session, packets, nullptr, {}, needIDR)) {
+        BOOST_LOG(error) << "encode failed";
         return -1;
       }
     }
@@ -2566,6 +2623,8 @@ namespace video {
       // If there is a specific encoder specified, use it if it passes validation
       KITTY_WHILE_LOOP(auto pos = std::begin(encoder_list), pos != std::end(encoder_list), {
         auto encoder = *pos;
+
+        BOOST_LOG(info) << "Enc: " << encoder->name;
 
         if (encoder->name == config::video.encoder) {
           // Remove the encoder from the list entirely if it fails validation

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ffnvcodec/nvEncodeAPI.h>
+//#include <ffnvcodec/nvEncodeAPI.h>
+#include "inc.h"
 
 namespace nvenc {
   struct nvenc_colorspace_t {

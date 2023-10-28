@@ -16,6 +16,7 @@
 
 namespace platf {
   class avcodec_encode_device_t;
+  class nvenc_encode_device_t;
   class img_t;
 }  // namespace platf
 
@@ -27,8 +28,11 @@ namespace cuda {
   }
   std::unique_ptr<platf::avcodec_encode_device_t>
   make_avcodec_encode_device(int width, int height, bool vram);
-  int
-  init();
+
+  //std::unique_ptr<platf::nvenc_encode_device_t>
+  //make_nvenc_encode_device(int pix_fmt); // platf::pix_fmt_e
+
+  int init();
 }  // namespace cuda
 
 typedef struct cudaArray *cudaArray_t;

@@ -74,7 +74,8 @@ namespace nvenc {
       device(device) {
   }
 
-  nvenc_base::~nvenc_base() {
+  nvenc_base::~nvenc_base()
+  {
     // Use destroy_encoder() instead
   }
 
@@ -85,17 +86,21 @@ namespace nvenc {
     if (encoder) destroy_encoder();
     auto fail_guard = util::fail_guard([this] { destroy_encoder(); });
 
+    BOOST_LOG(info) << "nvenc_base::create_encoder res:" << client_config.width << "x" << client_config.height;
+
     encoder_params.width = client_config.width;
     encoder_params.height = client_config.height;
     encoder_params.buffer_format = buffer_format;
     encoder_params.rfi = true;
 
-    NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
+    //NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
+    NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { 0 };
+    session_params.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
     session_params.device = device;
     session_params.deviceType = device_type;
     session_params.apiVersion = NVENCAPI_VERSION;
     if (nvenc_failed(nvenc->nvEncOpenEncodeSessionEx(&session_params, &encoder))) {
-      BOOST_LOG(error) << "NvEncOpenEncodeSessionEx failed";
+      BOOST_LOG(error) << "NvEncOpenEncodeSessionEx failed: " << last_error_string;
       return false;
     }
 
@@ -117,17 +122,21 @@ namespace nvenc {
       case 0:
         // H.264
         init_params.encodeGUID = NV_ENC_CODEC_H264_GUID;
+        BOOST_LOG(info) << "nvenc: NV_ENC_CODEC_H264_GUID";
         break;
 
       case 1:
         // HEVC
         init_params.encodeGUID = NV_ENC_CODEC_HEVC_GUID;
+        BOOST_LOG(info) << "nvenc: NV_ENC_CODEC_HEVC_GUID";
         break;
-
+#ifdef SUPPORT_AV1
       case 2:
         // AV1
         init_params.encodeGUID = NV_ENC_CODEC_AV1_GUID;
+        BOOST_LOG(info) << "nvenc: NV_ENC_CODEC_AV1_GUID";
         break;
+#endif
 
       default:
         BOOST_LOG(error) << "NvEnc: unknown video format " << client_config.videoFormat;
@@ -167,6 +176,8 @@ namespace nvenc {
         return false;
       }
     }
+
+    BOOST_LOG(info) << "nvenc: buffer_is_10bit: " << buffer_is_10bit() << " buffer_is_yuv444:" << buffer_is_yuv444();
 
     if (buffer_is_10bit() && !get_encoder_cap(NV_ENC_CAPS_SUPPORT_10BIT_ENCODE)) {
       BOOST_LOG(error) << "NvEnc: gpu doesn't support 10-bit encode";
@@ -303,6 +314,7 @@ namespace nvenc {
         break;
       }
 
+#ifdef SUPPORT_AV1
       case 2: {
         // AV1
         auto &format_config = enc_config.encodeCodecConfig.av1Config;
@@ -330,6 +342,7 @@ namespace nvenc {
         }
         break;
       }
+#endif
     }
 
     init_params.encodeConfig = &enc_config;
@@ -383,7 +396,9 @@ namespace nvenc {
   }
 
   void
-  nvenc_base::destroy_encoder() {
+  nvenc_base::destroy_encoder()
+  {
+      BOOST_LOG(info) << "nvenc_base::destroy_encoder()";
     if (output_bitstream) {
       nvenc->nvEncDestroyBitstreamBuffer(encoder, output_bitstream);
       output_bitstream = nullptr;
@@ -435,8 +450,12 @@ namespace nvenc {
     pic_params.outputBitstream = output_bitstream;
     pic_params.completionEvent = async_event_handle;
 
+    //BOOST_LOG(info) << "Calling nvEncEncodePicture ...";
     if (nvenc_failed(nvenc->nvEncEncodePicture(encoder, &pic_params))) {
       BOOST_LOG(error) << "NvEncEncodePicture failed: " << last_error_string;
+
+      exit(0); // TEST
+
       return {};
     }
 
@@ -486,6 +505,8 @@ namespace nvenc {
       using namespace std::literals;
       encoder_state.frame_size_tracker.collect_and_callback_on_interval(encoded_frame.data.size() / 1000., callback, 20s);
     }
+
+    test = 0;
 
     return encoded_frame;
   }

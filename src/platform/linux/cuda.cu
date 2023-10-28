@@ -315,4 +315,7 @@ int sws_t::load_ram(platf::img_t &img, cudaArray_t array) {
   return CU_CHECK_IGNORE(cudaMemcpy2DToArray(array, 0, 0, img.data, img.row_pitch, img.width * img.pixel_pitch, img.height, cudaMemcpyHostToDevice), "Couldn't copy to cuda array");
 }
 
+
+
+
 } // namespace cuda

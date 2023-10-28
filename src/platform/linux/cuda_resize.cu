@@ -26,11 +26,48 @@
 
 #include "cuda.h"
 
+// imageFormatDepth
+size_t imageFormatDepth( imageFormat format )
+{
+	switch(format)
+	{
+		case IMAGE_RGB8:		
+		case IMAGE_BGR8:		return sizeof(uchar3) * 8;
+		case IMAGE_RGBA8:		
+		case IMAGE_BGRA8:		return sizeof(uchar4) * 8;
+		case IMAGE_RGB32F:		
+		case IMAGE_BGR32F:		return sizeof(float3) * 8;
+		case IMAGE_RGBA32F: 	
+		case IMAGE_BGRA32F:		return sizeof(float4) * 8;
+		case IMAGE_GRAY8:		return sizeof(unsigned char) * 8;
+		case IMAGE_GRAY32F:		return sizeof(float) * 8;
+		case IMAGE_I420:
+		case IMAGE_YV12:
+		case IMAGE_NV12:		return 12;
+		case IMAGE_UYVY:
+		case IMAGE_YUYV:		
+		case IMAGE_YVYU:		return 16;
+		case IMAGE_BAYER_BGGR:
+		case IMAGE_BAYER_GBRG:
+		case IMAGE_BAYER_GRBG:
+		case IMAGE_BAYER_RGGB:	return sizeof(unsigned char) * 8;
+	}
+
+	return 0;
+}
+
+
+
+size_t imageFormatSize( imageFormat format, size_t width, size_t height )
+{
+    return (width * height * imageFormatDepth(format)) / 8;
+}
+
 /**
  * cudaCheckError
  * @ingroup cudaError
  */
-inline cudaError_t cudaCheckError(cudaError_t retval, const char* txt, const char* file, int line)
+cudaError_t cudaCheckError(cudaError_t retval, const char* txt, const char* file, int line)
 {
 #if !defined(CUDA_TRACE)
         if( retval == cudaSuccess)

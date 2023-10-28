@@ -57,6 +57,11 @@
  */
 #define SAFE_FREE(x)            if(x != NULL) { free(x); x = NULL; }
 
+
+size_t imageFormatDepth( imageFormat format );
+size_t imageFormatSize( imageFormat format, size_t width, size_t height );
+cudaError_t cudaCheckError(cudaError_t retval, const char* txt, const char* file, int line);
+
 /**
  * If a / b has a remainder, round up.  This function is commonly using when launching
  * CUDA kernels, to compute a grid size inclusive of the entire dataset if it's dimensions

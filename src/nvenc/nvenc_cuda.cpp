@@ -16,8 +16,6 @@
 #define DL_CLOSE_FUNC(l) dlclose(l)
 #endif
 
-//#define USE_CUDA_ARRAY
-
 namespace cu
 {
 
@@ -184,8 +182,10 @@ namespace nvenc {
       nvenc_base(NV_ENC_DEVICE_TYPE_CUDA, cu_context),
       cuda_context(cu_context),
       cuda_deviceptr(0),
+      cuda_resized_deviceptr(0),
       libHandle(nullptr),
       cudaPitch(0),
+      cudaResizedPitch(0),
       cudaWidth(0),
       cudaHeight(0),
       cuda_array(nullptr),
@@ -213,6 +213,19 @@ namespace nvenc {
             cdf->cuArrayDestroy(cuda_array);
             cuda_array = nullptr;
     }
+
+    if (cuda_deviceptr)
+    {
+        check(cdf->cuMemFree(cuda_deviceptr), "free cuda_deviceptr failed");
+        cuda_deviceptr = 0;
+    }
+
+    if (cuda_resized_deviceptr)
+    {
+        check(cdf->cuMemFree(cuda_resized_deviceptr), "free cuda_resized_deviceptr failed");
+        cuda_resized_deviceptr = 0;
+    }
+
     check(cdf->cuCtxDestroy(cuda_context), "cuCtxDestroy failed!");
 
     closeLibrary();
@@ -278,30 +291,29 @@ namespace nvenc {
   bool nvenc_cuda::transferToDevice(platf::img_t &img)
   {
         //return true;
-#if 0
-        if (test == 1)
-        {
-            BOOST_LOG(info) << "Still encoding!";
-            return true;
-        }
-#endif
 
-#ifdef USE_CUDA_ARRAY
-        if (img.width != cudaWidth || img.height != cudaHeight)
+        if (!cuda_resized_deviceptr || img.width != cudaWidth || img.height != cudaHeight)
         {
+            if (cuda_resized_deviceptr)
+            {
+                check(cdf->cuMemFree(cuda_resized_deviceptr), "free cuda_resized_deviceptr failed");
+                cuda_resized_deviceptr = 0;
+            }
             cdf->cuCtxPushCurrent(cuda_context);
-            register_cudaarray(img.width, img.height);
+            cuda_resized_deviceptr = alloc_pitched(img.width, img.height, cudaResizedPitch);
             cdf->cuCtxPopCurrent(NULL);
+
+            if (cuda_resized_deviceptr)
+            {
+                cudaWidth = img.width;
+                cudaHeight = img.height;
+            }
         }
-#else
-        // TODO
-#endif
 
         bool ret = true;
 
         cdf->cuCtxPushCurrent(cuda_context);
 
-#ifndef USE_CUDA_ARRAY
         CUDA_MEMCPY2D param = { 0, };
         param.srcMemoryType = CU_MEMORYTYPE_HOST;
         param.srcHost = img.data;
@@ -331,31 +343,6 @@ namespace nvenc {
                 << " WidthInBytes:" << param.WidthInBytes;
             ret = false;
         }
-#else
-        bool linear_interpolation = img.width != encoder_params.width ||
-            img.height != encoder_params.height;
-        if (sws.load_ram(img, tex.array))
-        {
-            BOOST_LOG(error) << "sws::load_ram failed!";
-            ret = false;
-        }
-#if 0
-        if (ret)
-        {
-            if (sws.convert(
-                img.data,
-                nullptr,
-                img.row_pitch,
-                0,
-                linear_interpolation ? tex.texture.linear : tex.texture.point,
-                stream.get()))
-            {
-                BOOST_LOG(error) << "sws::convert failed!";
-                ret = false;
-            }
-        }
-#endif
-#endif
 
         if (stream)
         {
@@ -458,38 +445,47 @@ namespace nvenc {
       return true;
   }
 
+  CUdeviceptr nvenc_cuda::alloc_pitched(uint32_t width, uint32_t height, size_t &pitch)
+  {
+        const auto fmt = encoder_params.buffer_format;
+        const auto w = width, h = height;
+
+        CUdeviceptr ret = 0;
+
+        uint32_t chromaHeight = cu::GetNumChromaPlanes(fmt) * cu::GetChromaHeight(fmt, h);
+        if (fmt == NV_ENC_BUFFER_FORMAT_YV12 || fmt == NV_ENC_BUFFER_FORMAT_IYUV)
+            chromaHeight = cu::GetChromaHeight(fmt, h);
+
+        if (!check(cdf->cuMemAllocPitch(
+            &ret,
+            &pitch,
+            cu::GetWidthInBytes(fmt, w),
+            h + chromaHeight,
+            16), "cuMemAllocPitch failed"))
+        {
+            ret = 0;
+        }
+        else
+        {
+            BOOST_LOG(info)
+                << "CUDA: cuMemAllocPitch succeeded."
+                << " pitch:" << pitch
+                << " deviceptr:" << ret 
+                << " res:" << width << "x" << height 
+                << " fmt:" << cu::GetBufferFormatName(encoder_params.buffer_format);
+        }
+
+        return ret;
+  }
+
   bool
   nvenc_cuda::create_and_register_input_buffer()
   {
 #if 1
     if (!cuda_deviceptr)
     {
-        const auto fmt = encoder_params.buffer_format;
-        const auto w = encoder_params.width, h = encoder_params.height;
-
-        uint32_t chromaHeight = cu::GetNumChromaPlanes(fmt) * cu::GetChromaHeight(fmt, h);
-        if (fmt == NV_ENC_BUFFER_FORMAT_YV12 || fmt == NV_ENC_BUFFER_FORMAT_IYUV)
-            chromaHeight = cu::GetChromaHeight(fmt, h);
-
         cdf->cuCtxPushCurrent(cuda_context);
-        if (!check(cdf->cuMemAllocPitch(
-            &cuda_deviceptr,
-            &cudaPitch,
-            cu::GetWidthInBytes(fmt, w),
-            h + chromaHeight,
-            16), "cuMemAllocPitch failed"))
-        {
-            cuda_deviceptr = 0;
-        }
-        else
-        {
-            BOOST_LOG(info)
-                << "CUDA: cuMemAllocPitch succeeded."
-                << " cudaPitch:" << cudaPitch
-                << " cuda_deviceptr:" << cuda_deviceptr
-                << " res:" << encoder_params.width << "x" << encoder_params.height 
-                << " fmt:" << cu::GetBufferFormatName(encoder_params.buffer_format);
-        }
+        cuda_deviceptr = alloc_pitched(encoder_params.width, encoder_params.height, cudaPitch);
         cdf->cuCtxPopCurrent(NULL);
     }
 

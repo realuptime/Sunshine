@@ -33,7 +33,7 @@ namespace nvenc
 
     void closeLibrary();
 
-    CUdeviceptr alloc_pitched(uint32_t width, uint32_t height, size_t &pitch);
+    CUdeviceptr alloc_pitched(uint32_t width, uint32_t height, size_t &pitch, const char *msg);
 
     CUcontext cuda_context;
     CUdeviceptr cuda_deviceptr, cuda_resized_deviceptr;

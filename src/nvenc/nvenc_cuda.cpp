@@ -300,7 +300,7 @@ namespace nvenc {
                 cuda_resized_deviceptr = 0;
             }
             cdf->cuCtxPushCurrent(cuda_context);
-            cuda_resized_deviceptr = alloc_pitched(img.width, img.height, cudaResizedPitch);
+            cuda_resized_deviceptr = alloc_pitched(img.width, img.height, cudaResizedPitch, "resize buffer");
             cdf->cuCtxPopCurrent(NULL);
 
             if (cuda_resized_deviceptr)
@@ -445,7 +445,7 @@ namespace nvenc {
       return true;
   }
 
-  CUdeviceptr nvenc_cuda::alloc_pitched(uint32_t width, uint32_t height, size_t &pitch)
+  CUdeviceptr nvenc_cuda::alloc_pitched(uint32_t width, uint32_t height, size_t &pitch, const char *msg)
   {
         const auto fmt = encoder_params.buffer_format;
         const auto w = width, h = height;
@@ -468,7 +468,7 @@ namespace nvenc {
         else
         {
             BOOST_LOG(info)
-                << "CUDA: cuMemAllocPitch succeeded."
+                << "CUDA: cuMemAllocPitch(" << msg << ") succeeded."
                 << " pitch:" << pitch
                 << " deviceptr:" << ret 
                 << " res:" << width << "x" << height 
@@ -485,7 +485,7 @@ namespace nvenc {
     if (!cuda_deviceptr)
     {
         cdf->cuCtxPushCurrent(cuda_context);
-        cuda_deviceptr = alloc_pitched(encoder_params.width, encoder_params.height, cudaPitch);
+        cuda_deviceptr = alloc_pitched(encoder_params.width, encoder_params.height, cudaPitch, "encoder buffer");
         cdf->cuCtxPopCurrent(NULL);
     }
 

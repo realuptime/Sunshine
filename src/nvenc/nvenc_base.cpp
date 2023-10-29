@@ -236,13 +236,17 @@ namespace nvenc {
     }
 
 #if 1 // WORKING CONFIGURATION with deprecated NV_ENC_PRESET_LOW_LATENCY_DEFAULT_GUID
+
+    #if 0 // Works without those as well
     init_params.presetGUID = NV_ENC_PRESET_LOW_LATENCY_DEFAULT_GUID;
     init_params.tuningInfo = (NV_ENC_TUNING_INFO)0;
-    enc_config.rcParams.enableAQ = 0;
     enc_config.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR_LOWDELAY_HQ;
+    enc_config.rcParams.lowDelayKeyFrameScale = 0;
+    #endif
+
+    enc_config.rcParams.enableAQ = 0;
     enc_config.rcParams.multiPass = NV_ENC_MULTI_PASS_DISABLED;
     enc_config.rcParams.vbvBufferSize = 0;
-    enc_config.rcParams.lowDelayKeyFrameScale = 0;
 #endif
 
     auto set_h264_hevc_common_format_config = [&](auto &format_config) {

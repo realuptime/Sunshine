@@ -496,6 +496,13 @@ namespace nvenc {
       encoder_state.rfi_needs_confirmation,
     };
 
+#if 1
+    if (encoded_frame.idr)
+    {
+        BOOST_LOG(info) << "nvenc IDR frame!";
+    }
+#endif
+
     if (encoder_state.rfi_needs_confirmation) {
       // Invalidation request has been fulfilled, and video network packet will be marked as such
       encoder_state.rfi_needs_confirmation = false;

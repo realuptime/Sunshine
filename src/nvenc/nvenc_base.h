@@ -32,6 +32,9 @@ namespace nvenc {
     bool
     invalidate_ref_frames(uint64_t first_frame, uint64_t last_frame);
 
+    bool change_bitrate(uint32_t bitrate);
+    uint32_t get_bitrate() const;
+
   protected:
     virtual bool
     init_library() = 0;
@@ -44,6 +47,8 @@ namespace nvenc {
 
     bool
     nvenc_failed(NVENCSTATUS status);
+
+    bool reconfig();
 
     const NV_ENC_DEVICE_TYPE device_type;
     void *const device;
@@ -58,6 +63,7 @@ namespace nvenc {
       NV_ENC_BUFFER_FORMAT buffer_format = NV_ENC_BUFFER_FORMAT_UNDEFINED;
       uint32_t ref_frames_in_dpb = 0;
       bool rfi = false;
+      uint32_t bitrate = 0, requested_bitrate = 0;
     } encoder_params;
 
     // Derived classes set these variables
@@ -70,6 +76,9 @@ namespace nvenc {
 
   private:
     NV_ENC_OUTPUT_PTR output_bitstream = nullptr;
+    NV_ENC_INITIALIZE_PARAMS _init_params;
+    NV_ENC_CONFIG _enc_config;
+    NV_ENC_RECONFIGURE_PARAMS _reinit_params;
 
     struct {
       uint64_t last_encoded_frame_index = 0;

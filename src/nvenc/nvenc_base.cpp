@@ -86,12 +86,13 @@ namespace nvenc {
     if (encoder) destroy_encoder();
     auto fail_guard = util::fail_guard([this] { destroy_encoder(); });
 
-    BOOST_LOG(info) << "nvenc_base::create_encoder res:" << client_config.width << "x" << client_config.height;
+    BOOST_LOG(info) << "nvenc_base::create_encoder res:" << client_config.width << "x" << client_config.height << " bitrate:" << client_config.bitrate;
 
     encoder_params.width = client_config.width;
     encoder_params.height = client_config.height;
     encoder_params.buffer_format = buffer_format;
     encoder_params.rfi = true;
+    encoder_params.bitrate = client_config.bitrate;
 
     //NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { 0 };
@@ -231,6 +232,7 @@ namespace nvenc {
     enc_config.rcParams.enableAQ = config.adaptive_quantization;
     enc_config.rcParams.averageBitRate = client_config.bitrate * 1000;
 
+    BOOST_LOG(info) << "nvenc: get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE)" << get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE);
     if (get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE)) {
       enc_config.rcParams.vbvBufferSize = client_config.bitrate * 1000 / client_config.framerate;
     }
@@ -389,6 +391,15 @@ namespace nvenc {
       if (config.insert_filler_data) extra += " filler-data";
       BOOST_LOG(info) << "NvEnc: created encoder " << quality_preset_string_from_guid(init_params.presetGUID) << extra;
     }
+
+    _init_params = std::move(init_params);
+    _enc_config = std::move(enc_config);
+    _init_params.encodeConfig = &_enc_config;
+
+    memset(&_reinit_params, 0, sizeof(_reinit_params));
+    _reinit_params.version = NV_ENC_RECONFIGURE_PARAMS_VER;
+    _reinit_params.reInitEncodeParams = _init_params;
+    _reinit_params.reInitEncodeParams.encodeConfig = &_enc_config;
 
     encoder_state = {};
     fail_guard.disable();
@@ -599,6 +610,34 @@ namespace nvenc {
     }
 
     return false;
+  }
+
+
+  uint32_t nvenc_base::get_bitrate() const
+  {
+      return _enc_config.rcParams.averageBitRate;
+  }
+
+  bool nvenc_base::change_bitrate(uint32_t bitrate)
+  {
+      BOOST_LOG(info)
+        << "nvenc_base: change_bitrate: " << _enc_config.rcParams.averageBitRate / 1000
+        << " -> "
+        << bitrate / 1000;
+      //_reinit_params.reInitEncodeParams.encodeConfig->rcParams.averageBitRate = bitrate;
+      _enc_config.rcParams.averageBitRate = bitrate;
+      return reconfig();
+  }
+ 
+  bool nvenc_base::reconfig()
+  {
+    if (nvenc_failed(nvenc->nvEncReconfigureEncoder(encoder, &_reinit_params)))
+    {
+      BOOST_LOG(error) << "nvEncReconfigureEncoder failed: " << last_error_string;
+      return false;
+    }
+
+    return true;
   }
 
 }  // namespace nvenc

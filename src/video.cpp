@@ -511,6 +511,18 @@ namespace video {
       return result;
     }
 
+    uint32_t get_bitrate() const
+    {
+      if (!device || !device->nvenc) return 0;
+      return device->nvenc->get_bitrate();
+    }
+
+    bool change_bitrate(uint32_t bitrate) const
+    {
+      if (!device || !device->nvenc) return false;
+      return device->nvenc->change_bitrate(bitrate);
+    }
+
   private:
     std::unique_ptr<platf::nvenc_encode_device_t> device;
     bool force_idr = false;
@@ -1434,7 +1446,7 @@ namespace video {
   encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
 
 	needIDR = false;
-#if 0
+#if 1
 	// SCREAM Target Bitrate
 	{
 		std::lock_guard lock { scream::GetLock() };
@@ -1460,12 +1472,13 @@ namespace video {
 
                 avcodec_encode_session_t *avcodec_session = dynamic_cast<avcodec_encode_session_t *>(&session);
                 nvenc_encode_session_t *nvenc_session = avcodec_session ? nullptr : dynamic_cast<nvenc_encode_session_t *>(&session);
-                if (avcodec_session) {
+                if (avcodec_session)
+                {
                     iEncoderRate = avcodec_session->avcodec_ctx->bit_rate;
                 }
-                else if (nvenc_session) {
-                    // TODO
-                    //iEncoderRate = nvenc_session->nvenc->;
+                else if (nvenc_session)
+                {
+                    iEncoderRate = nvenc_session->get_bitrate();
                 }
 
                 //if (iEncoderRate != iRateToSet)
@@ -1488,7 +1501,7 @@ namespace video {
                     }
                     else if (nvenc_session)
                     {
-                        // TODO
+                        nvenc_session->change_bitrate(iRateToSet);
                     }
                 }
             }

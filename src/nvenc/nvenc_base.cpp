@@ -631,11 +631,12 @@ namespace nvenc {
 
   bool nvenc_base::change_bitrate(uint32_t bitrate)
   {
+#if 0
       BOOST_LOG(info)
         << "nvenc_base: change_bitrate: " << _enc_config.rcParams.averageBitRate / 1000
         << " -> "
         << bitrate / 1000;
-      //_reinit_params.reInitEncodeParams.encodeConfig->rcParams.averageBitRate = bitrate;
+#endif
       _enc_config.rcParams.averageBitRate = bitrate;
       _enc_config.rcParams.maxBitRate = bitrate;
 

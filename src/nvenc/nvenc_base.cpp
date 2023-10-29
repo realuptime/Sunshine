@@ -228,14 +228,22 @@ namespace nvenc {
     enc_config.rcParams.multiPass = config.two_pass == nvenc_two_pass::quarter_resolution ? NV_ENC_TWO_PASS_QUARTER_RESOLUTION :
                                     config.two_pass == nvenc_two_pass::full_resolution    ? NV_ENC_TWO_PASS_FULL_RESOLUTION :
                                                                                             NV_ENC_MULTI_PASS_DISABLED;
-
-    enc_config.rcParams.enableAQ = config.adaptive_quantization;
     enc_config.rcParams.averageBitRate = client_config.bitrate * 1000;
 
-    BOOST_LOG(info) << "nvenc: get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE)" << get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE);
+    BOOST_LOG(info) << "nvenc: get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE): " << get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE);
     if (get_encoder_cap(NV_ENC_CAPS_SUPPORT_CUSTOM_VBV_BUF_SIZE)) {
       enc_config.rcParams.vbvBufferSize = client_config.bitrate * 1000 / client_config.framerate;
     }
+
+#if 1 // WORKING CONFIGURATION with deprecated NV_ENC_PRESET_LOW_LATENCY_DEFAULT_GUID
+    init_params.presetGUID = NV_ENC_PRESET_LOW_LATENCY_DEFAULT_GUID;
+    init_params.tuningInfo = (NV_ENC_TUNING_INFO)0;
+    enc_config.rcParams.enableAQ = 0;
+    enc_config.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR_LOWDELAY_HQ;
+    enc_config.rcParams.multiPass = NV_ENC_MULTI_PASS_DISABLED;
+    enc_config.rcParams.vbvBufferSize = 0;
+    enc_config.rcParams.lowDelayKeyFrameScale = 0;
+#endif
 
     auto set_h264_hevc_common_format_config = [&](auto &format_config) {
       format_config.repeatSPSPPS = 1;
@@ -396,10 +404,6 @@ namespace nvenc {
     _enc_config = std::move(enc_config);
     _init_params.encodeConfig = &_enc_config;
 
-    memset(&_reinit_params, 0, sizeof(_reinit_params));
-    _reinit_params.version = NV_ENC_RECONFIGURE_PARAMS_VER;
-    _reinit_params.reInitEncodeParams = _init_params;
-    _reinit_params.reInitEncodeParams.encodeConfig = &_enc_config;
 
     encoder_state = {};
     fail_guard.disable();
@@ -464,9 +468,6 @@ namespace nvenc {
     //BOOST_LOG(info) << "Calling nvEncEncodePicture ...";
     if (nvenc_failed(nvenc->nvEncEncodePicture(encoder, &pic_params))) {
       BOOST_LOG(error) << "NvEncEncodePicture failed: " << last_error_string;
-
-      exit(0); // TEST
-
       return {};
     }
 
@@ -626,6 +627,18 @@ namespace nvenc {
         << bitrate / 1000;
       //_reinit_params.reInitEncodeParams.encodeConfig->rcParams.averageBitRate = bitrate;
       _enc_config.rcParams.averageBitRate = bitrate;
+      _enc_config.rcParams.maxBitRate = bitrate;
+
+      memset(&_reinit_params, 0, sizeof(_reinit_params));
+      _reinit_params.version = NV_ENC_RECONFIGURE_PARAMS_VER;
+      _reinit_params.reInitEncodeParams = _init_params;
+      _reinit_params.reInitEncodeParams.encodeConfig = &_enc_config;
+
+#if 0
+      _reinit_params.resetEncoder = 1;
+      _reinit_params.forceIDR = 1;
+#endif
+
       return reconfig();
   }
  

@@ -92,7 +92,6 @@ namespace nvenc {
     encoder_params.height = client_config.height;
     encoder_params.buffer_format = buffer_format;
     encoder_params.rfi = true;
-    encoder_params.bitrate = client_config.bitrate;
 
     //NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER };
     NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS session_params = { 0 };

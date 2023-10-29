@@ -63,7 +63,6 @@ namespace nvenc {
       NV_ENC_BUFFER_FORMAT buffer_format = NV_ENC_BUFFER_FORMAT_UNDEFINED;
       uint32_t ref_frames_in_dpb = 0;
       bool rfi = false;
-      uint32_t bitrate = 0, requested_bitrate = 0;
     } encoder_params;
 
     // Derived classes set these variables

@@ -574,7 +574,7 @@ namespace stream {
 
       auto data_shards = payload_size / blocksize + (pad ? 1 : 0);
 
-#if 0
+#if 1
       auto parity_shards = (data_shards * fecpercentage + 99) / 100;
 
       // increase the FEC percentage for this frame if the parity shard minimum is not met
@@ -1393,25 +1393,29 @@ namespace stream {
               accumTransSize /= nsec;
               accumPayloadSize /= nsec;
 
+              const float screamTargetRate = scream::GetTargetBitrate(VIDEO_SSRC);
               const int additionalData = accumTransSize - accumPayloadSize;
-              const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
-              printf("SCREAM: nsec:%zu cfgPktSize:%d BS:%d NP:%d shards:%d/%.0f%%/%d frame:%zu"
+              //const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
+              const int encRateKBits = video::getEncoderRate() / 1000;
+              const int accumPayloadKBits = accumPayloadSize * 8 / 1000;
+              printf("SCREAM: nsec:%zu pktSize:%d BS:%d NP:%d shards:%d lastFrame:%zu"
                 " fecPercentage:%d"
-                " additionalDataRate:%d + encoderRate:%d = toSendRate:%d kbps / %.1f%% addition\n"
+                " fecRate:%d + encRate:%d/%d/diff:%d = sendRate:%dkbps targetRate:%d"
+                "\n"
                 ,
                 nsec,
                 session->config.packetsize,
                 blocksize,
                 nPackets,
                 nShards,
-                float(nShards) * 100.0f / nPackets,
-                curNShards,
                 packet->data_size(),
                 fecPercentage,
                 additionalData * 8 / 1000,
-                accumPayloadSize * 8 / 1000,
+                accumPayloadKBits,
+                encRateKBits,
+                encRateKBits - accumPayloadKBits,
                 accumTransSize * 8 / 1000,
-                additionalDataPrc 
+                int(screamTargetRate / 1000)
               );
 
               accumTransSize = 0;

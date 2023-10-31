@@ -14,7 +14,13 @@ void packet_free(void *buf, uint32_t ssrc)
 	free(buf);
 }
 
-namespace scream {
+namespace video
+{
+    extern int getEncoderRate();
+}
+
+namespace scream
+{
 
 bool useL4S = true;
 
@@ -46,7 +52,7 @@ int fixedRate = 0;
 bool disablePacing = 0;
 int initRate = 700;
 int minRate = 700;
-int maxRate = 8000;
+int maxRate = 20000;
 bool enableClockDriftCompensation = false;
 #ifdef V2
 float packetPacingHeadroom = 1.5f;
@@ -437,8 +443,10 @@ void StartStreaming(uint32_t ssrc, const boost::asio::ip::udp::endpoint &peer, b
 	stopThread = false;
 	transmitThread = std::thread { transmitRtpThread, std::ref(sock), peer };
 
+#if 0
     stopLogThread = false;
 	logThread = std::thread { logThreadProc };
+#endif
 }
 
 void StopStreaming(uint32_t ssrc)

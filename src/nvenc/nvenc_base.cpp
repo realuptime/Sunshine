@@ -194,6 +194,8 @@ namespace nvenc {
       async_event_handle = nullptr;
     }
 
+    BOOST_LOG(info) << "nvenc: framerate: " << client_config.framerate << " rfi:" << get_encoder_cap(NV_ENC_CAPS_SUPPORT_REF_PIC_INVALIDATION);
+
     encoder_params.rfi = get_encoder_cap(NV_ENC_CAPS_SUPPORT_REF_PIC_INVALIDATION);
 
     init_params.presetGUID = quality_preset_guid_from_number(config.quality_preset);
@@ -639,6 +641,8 @@ namespace nvenc {
 #endif
       _enc_config.rcParams.averageBitRate = bitrate;
       _enc_config.rcParams.maxBitRate = bitrate;
+
+      //_enc_config.rcParams.vbvBufferSize = bitrate / _init_params.frameRateNum;
 
       memset(&_reinit_params, 0, sizeof(_reinit_params));
       _reinit_params.version = NV_ENC_RECONFIGURE_PARAMS_VER;

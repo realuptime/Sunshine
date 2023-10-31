@@ -33,7 +33,34 @@ extern "C" {
 #endif
 
 using namespace std::literals;
-namespace video {
+namespace video
+{
+
+    using millis = std::chrono::milliseconds;
+
+    int iEncoderRate = 0;
+    int _encoderBitrateMs = 20;
+    int _encoderBitrateDelta = 0;
+    millis _lastTimeEncoderWasSet = millis::zero();
+
+    // Return current time in milliseconds
+    static millis GetTimeInMilliseconds()
+    {
+        return std::chrono::duration_cast<millis>(std::chrono::system_clock::now().time_since_epoch());
+    }
+
+    bool ShouldUpdateEncoderBitrateByTime()
+    {
+        if (_encoderBitrateMs == 0)
+            return true;
+        return _lastTimeEncoderWasSet == millis::zero() || 
+            GetTimeInMilliseconds() >= _lastTimeEncoderWasSet + millis(_encoderBitrateMs);
+    }
+
+  int getEncoderRate()
+  {
+      return iEncoderRate;
+  }
 
   void
   free_ctx(AVCodecContext *ctx) {
@@ -1033,8 +1060,6 @@ namespace video {
 #endif
 
   static const std::vector<encoder_t *> encoders {
-    &nvenc_standalone,
-
 #if 0
 #ifndef __APPLE__
     &nvenc,
@@ -1050,6 +1075,8 @@ namespace video {
     &videotoolbox,
 #endif
     &software
+#else
+    &nvenc_standalone,
 #endif
   };
 
@@ -1451,11 +1478,21 @@ namespace video {
 	{
 		std::lock_guard lock { scream::GetLock() };
 
-        static time_t lastTime = time(0);
-        time_t now = time(0);
-        if (now != lastTime)
+        // By time
+		bool doUpdate = ShouldUpdateEncoderBitrateByTime();
+		// By bitrate delta
+		//if (!doUpdate)
+		//{
+		//	if (_encoderBitrateDelta > 0 && std::abs(encoderRate - desiredRate) > _encoderBitrateDelta)
+		//	{
+		//		doUpdate = true;
+		//	}
+		//}
+
+        if (doUpdate)
         {
-            lastTime = now;
+            _lastTimeEncoderWasSet = GetTimeInMilliseconds();
+
             float rateToSet = scream::GetTargetBitrate(VIDEO_SSRC);
             if (rateToSet > 0.0f)
             {
@@ -1465,10 +1502,13 @@ namespace video {
                 const float rateMultiply = 1.0f;
                 rateToSet *= rateMultiply;
 
-                rateToSet = std::max(rateToSet - 2000000.0f, 200000.0f); // substract 1400 Mbps for video + 400kbps for audio
+                const float controlRate = 100 * 1000;
+                const float audioRate = 50 * 1000;
+                const float additionalVideoRate = 2100 * 1000;
+
+                rateToSet = std::max(rateToSet - (additionalVideoRate + audioRate + controlRate), 200.0f * 1000.0f); // min 200kbits/s
 
                 int iRateToSet = rateToSet;
-                int iEncoderRate = 0;
 
                 avcodec_encode_session_t *avcodec_session = dynamic_cast<avcodec_encode_session_t *>(&session);
                 nvenc_encode_session_t *nvenc_session = avcodec_session ? nullptr : dynamic_cast<nvenc_encode_session_t *>(&session);
@@ -1483,7 +1523,7 @@ namespace video {
 
                 //if (iEncoderRate != iRateToSet)
                 {
-                    BOOST_LOG(info) << "DYNBITRATE: encoder rate: " << (iEncoderRate / 1000) << " -> " << (iRateToSet / 1000);
+                    //BOOST_LOG(info) << "DYNBITRATE: encoder rate: " << (iEncoderRate / 1000) << " -> " << (iRateToSet / 1000);
                     if (avcodec_session)
                     {
                         auto ctxp = avcodec_session->avcodec_ctx.get();
@@ -2593,6 +2633,7 @@ namespace video {
     return true;
   }
 
+
   /**
    * This is called once at startup and each time a stream is launched to
    * ensure the best encoder is selected. Encoder availability can change
@@ -2601,7 +2642,26 @@ namespace video {
    * This is only safe to call when there is no client actively streaming.
    */
   int
-  probe_encoders() {
+  probe_encoders()
+  {
+#if 1
+    const char *cstr = getenv("ENCODER_BITRATE_PERIOD_MS");
+	if (cstr)
+	{
+		_encoderBitrateMs = atoi(cstr);
+		BOOST_LOG(info) << "SCREAM: Bitrate: ENCODER_BITRATE_PERIOD_MS set " <<_encoderBitrateMs;
+	}
+    cstr = getenv("ENCODER_BITRATE_DELTA");
+	if (cstr)
+	{
+		_encoderBitrateDelta = atoi(cstr);
+		BOOST_LOG(info) << "SCREAM: BitrateSignal: ENCODER_BITRATE_DELTA set " << _encoderBitrateDelta;
+	}
+
+	BOOST_LOG(info) << "SCREAM: BitrateSignal: ENCODER_BITRATE_PERIOD_MS = " << _encoderBitrateMs;
+	BOOST_LOG(info) << "SCREAM: BitrateSignal: ENCODER_BITRATE_DELTA = " << _encoderBitrateDelta;
+#endif
+
     auto encoder_list = encoders;
 
     // Restart encoder selection
@@ -2844,7 +2904,7 @@ namespace video {
   }
 
 #ifdef _WIN32
-}
+} // namespace video
 
 void
 do_nothing(void *) {}
@@ -2948,4 +3008,4 @@ namespace video {
     return platf::pix_fmt_e::unknown;
   }
 
-}  // namespace video
+} // namespace video

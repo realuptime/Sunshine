@@ -154,6 +154,8 @@ namespace video {
     config_t config,
     void *channel_data);
 
+  int getEncoderRate();
+
   int
   probe_encoders();
 }  // namespace video

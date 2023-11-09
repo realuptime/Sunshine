@@ -1285,6 +1285,10 @@ namespace stream {
       int curTransSize = 0;
       int curNShards = 0;
       int curDataShards = 0;
+      size_t curFecPercentage = 0;
+      static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
+      static float accumAdditionalVideoRate = 0;
+      static int nAccumAdditionalVideRates = 0;
 
       try {
         auto blockIndex = 0;
@@ -1311,6 +1315,8 @@ namespace stream {
           }
 
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
+
+          curFecPercentage = shards.percentage;
 
           // set FEC info now that we know for sure what our percentage will be for this frame
           for (auto x = 0; x < shards.size(); ++x) {
@@ -1394,9 +1400,10 @@ namespace stream {
         }); // loop fec_blocks
 
 #if 1
-          static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
           accumTransSize += curTransSize;
           accumPayloadSize += int(packet->data_size());
+          accumAdditionalVideoRate += video::_additionalVideoRate / 1000.0f; // kbps
+          nAccumAdditionalVideRates++;
           nPackets++;
           nShards += curNShards;
 
@@ -1410,45 +1417,48 @@ namespace stream {
 
               accumTransSize /= nsec;
               accumPayloadSize /= nsec;
+              if (nAccumAdditionalVideRates > 0)
+                  accumAdditionalVideoRate /= nAccumAdditionalVideRates;
 
               const float screamTargetRate = scream::GetTargetBitrate(VIDEO_SSRC);
               const int additionalData = accumTransSize - accumPayloadSize;
               const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
-              const float additionalCompDataPrc = accumTransSize ? ((video::_additionalVideoRate / 8.0f * 100.0f) / accumTransSize) : 0.0f;
+              const float additionalCompDataPrc = accumTransSize ? ((accumAdditionalVideoRate * 1000.0f / 8.0f * 100.0f) / accumTransSize) : 0.0f;
               const int encRateKBits = video::getEncoderRate() / 1000;
               const int accumPayloadKBits = accumPayloadSize * 8 / 1000;
-              printf("SCREAM: nsec:%zu pktSize:%d BS:%d NP:%d shards:%d/T:%d/D:%d/P:%d lastFrame:%.1f"
-                " fecPercentage:%d"
+              printf("SCREAM: BS:%d NP:%d shards:%d/T:%d/D:%d/P:%d PS:%.1f"
+                " fecPercentage:%d/%zu"
                 " fecRate:%d/%.0f + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d minFec:%d additionalPrc:%.1f%%/%.1f%%"
                 "\n"
                 ,
-                nsec,
-                session->config.packetsize,
-                blocksize,
-                nPackets,
-                nShards,
-                curNShards,
-                curDataShards,
+                blocksize, // block size
+                nPackets, // number of frame per second
+                nShards, // number of shards per second
+                curNShards, // number of shards (data + parity) for the last packet
+                curDataShards, // number of data shards for the last packets
                 curNShards - curDataShards,
-                packet->data_size() * 8 / 1000.0f,
-                fecPercentage,
-                additionalData * 8 / 1000,
-                video::_additionalVideoRate / 1000,
-                accumPayloadKBits,
-                encRateKBits,
-                encRateKBits - accumPayloadKBits,
-                accumTransSize * 8 / 1000,
-                int(screamTargetRate / 1000),
-                (accumTransSize * 8 / 1000) - int(screamTargetRate / 1000),
-                session->config.minRequiredFecPackets,
-                additionalDataPrc,
-                additionalCompDataPrc
+                packet->data_size() * 8 / 1000.0f, // packet size
+                fecPercentage, // configured FEC percentage
+                curFecPercentage, // last FEC percentage used, could be different / adjusted to the once configured
+                additionalData * 8 / 1000, // additional data in kbps
+                accumAdditionalVideoRate, // computed additional data kbps
+                accumPayloadKBits, // payload in kbps, which is encoder rate
+                encRateKBits, // the current encoder rate
+                encRateKBits - accumPayloadKBits, // diff between payload rate and encoder rate
+                accumTransSize * 8 / 1000, // actual send rate
+                int(screamTargetRate / 1000), // scream target rate
+                (accumTransSize * 8 / 1000) - int(screamTargetRate / 1000), // diff between actual send rate and scream target rate
+                session->config.minRequiredFecPackets, // min FEC packets comming from the client
+                additionalDataPrc, // percent of additional data
+                additionalCompDataPrc // percent of the computed additional data
               );
 
               accumTransSize = 0;
               accumPayloadSize = 0;
               nPackets = 0;
               nShards = 0;
+              accumAdditionalVideoRate = 0;
+              nAccumAdditionalVideRates = 0;
           }
 #endif
 

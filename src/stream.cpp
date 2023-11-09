@@ -31,6 +31,13 @@ extern "C" {
 
 #include "scream/Wrapper.h"
 
+
+
+namespace video
+{
+    extern float _additionalVideoRate;
+}
+
 #define IDX_START_A 0
 #define IDX_START_B 1
 #define IDX_INVALIDATE_REF_FRAMES 2
@@ -579,10 +586,11 @@ namespace stream {
 
       // increase the FEC percentage for this frame if the parity shard minimum is not met
       if (parity_shards < minparityshards) {
+        auto prev_parity_shards = parity_shards;
         parity_shards = minparityshards;
         fecpercentage = (100 * parity_shards) / data_shards;
 
-        BOOST_LOG(verbose) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << std::endl;
+        BOOST_LOG(debug) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << " data:" << data_shards << " min:" << minparityshards << " parity_shards:" << prev_parity_shards << " payload:" << payload_size << std::endl;
       }
 #else
       int parity_shards = std::max(1, int(minparityshards) - int(data_shards));
@@ -1266,8 +1274,17 @@ namespace stream {
         fec_blocks[0] = payload;
       }
 
+#if 0
+      BOOST_LOG(info)
+        << "fec_blocks[0]:" << fec_blocks[0].size()
+        << " fec_blocks[1]:" << fec_blocks[1].size()
+        << " fec_blocks[2]:" << fec_blocks[2].size()
+        ;
+#endif
+
       int curTransSize = 0;
       int curNShards = 0;
+      int curDataShards = 0;
 
       try {
         auto blockIndex = 0;
@@ -1318,7 +1335,8 @@ namespace stream {
 
             curTransSize += shards.blocksize;
           }
-          curNShards += shards.size();
+          curNShards += shards.nr_shards;
+          curDataShards += shards.data_shards;
 
 #if 0
           auto peer_address = session->video.peer.address();
@@ -1373,7 +1391,7 @@ namespace stream {
 
           ++blockIndex;
           lowseq += shards.size();
-        });
+        }); // loop fec_blocks
 
 #if 1
           static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
@@ -1395,12 +1413,13 @@ namespace stream {
 
               const float screamTargetRate = scream::GetTargetBitrate(VIDEO_SSRC);
               const int additionalData = accumTransSize - accumPayloadSize;
-              //const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
+              const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
+              const float additionalCompDataPrc = accumTransSize ? ((video::_additionalVideoRate / 8.0f * 100.0f) / accumTransSize) : 0.0f;
               const int encRateKBits = video::getEncoderRate() / 1000;
               const int accumPayloadKBits = accumPayloadSize * 8 / 1000;
-              printf("SCREAM: nsec:%zu pktSize:%d BS:%d NP:%d shards:%d lastFrame:%zu"
+              printf("SCREAM: nsec:%zu pktSize:%d BS:%d NP:%d shards:%d/T:%d/D:%d/P:%d lastFrame:%.1f"
                 " fecPercentage:%d"
-                " fecRate:%d + encRate:%d/%d/diff:%d = sendRate:%dkbps targetRate:%d"
+                " fecRate:%d/%.0f + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d minFec:%d additionalPrc:%.1f%%/%.1f%%"
                 "\n"
                 ,
                 nsec,
@@ -1408,14 +1427,22 @@ namespace stream {
                 blocksize,
                 nPackets,
                 nShards,
-                packet->data_size(),
+                curNShards,
+                curDataShards,
+                curNShards - curDataShards,
+                packet->data_size() * 8 / 1000.0f,
                 fecPercentage,
                 additionalData * 8 / 1000,
+                video::_additionalVideoRate / 1000,
                 accumPayloadKBits,
                 encRateKBits,
                 encRateKBits - accumPayloadKBits,
                 accumTransSize * 8 / 1000,
-                int(screamTargetRate / 1000)
+                int(screamTargetRate / 1000),
+                (accumTransSize * 8 / 1000) - int(screamTargetRate / 1000),
+                session->config.minRequiredFecPackets,
+                additionalDataPrc,
+                additionalCompDataPrc
               );
 
               accumTransSize = 0;

@@ -401,6 +401,8 @@ namespace platf {
       if (!nvenc_cuda) return false;
 
       nvenc::nvenc_config nvenc_config;
+      nvenc_config.insert_filler_data = true;
+      nvenc_config.two_pass = nvenc::nvenc_two_pass::disabled;
       auto nvenc_colorspace = nvenc::nvenc_colorspace_from_sunshine_colorspace(colorspace);
       return nvenc_cuda->create_encoder(nvenc_config, client_config, nvenc_colorspace, NV_ENC_BUFFER_FORMAT_ARGB);
     }

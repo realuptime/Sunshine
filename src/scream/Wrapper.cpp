@@ -52,8 +52,10 @@ int fixedRate = 0;
 bool disablePacing = 0;
 int initRate = 700;
 int minRate = 700;
+
 //int maxRate = 20000;
 int maxRate = 8000;
+
 bool enableClockDriftCompensation = false;
 #ifdef V2
 float packetPacingHeadroom = 1.5f;

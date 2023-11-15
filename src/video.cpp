@@ -36,7 +36,7 @@ using namespace std::literals;
 namespace video
 {
 
-    float _additionalVideoRate = 0;
+    size_t _shards = 0;
 
     using millis = std::chrono::milliseconds;
 
@@ -1450,13 +1450,13 @@ namespace video
     return 0;
   }
 
-    float calcFecVideoRate(float encoderRate, int blocksize, int multi_fec_threshold, float framerate, size_t fecPercentage)
+    float calcFecVideoRate(float encoderRate, int blocksize, int multi_fec_threshold, float framerate, size_t fecPercentage, size_t &nShards)
     {
         const int encoderPacketSize = (encoderRate / 8) / framerate + 8; // sizeof(video_short_frame_header_t) == 8
 
         constexpr size_t DATA_SHARDS_MAX = 255;
         // Align individual fec blocks to blocksize
-        size_t nShards = 0;
+        nShards = 0;
         int aligned_size = 0;
         int maxFecBlocks = 0;
         if (encoderPacketSize > multi_fec_threshold)
@@ -1485,11 +1485,18 @@ namespace video
             auto data_shards = fec_block_size / blocksize + (pad ? 1 : 0);
             auto parity_shards = (data_shards * fecPercentage + 99) / 100;
 
-            const size_t minparityshards = 2;
-            if (parity_shards < minparityshards)
+            if (fecPercentage > 0.0f)
             {
-                parity_shards = minparityshards;
-                fecPercentage = (100 * parity_shards) / data_shards;
+                const size_t minparityshards = 2;
+                if (parity_shards < minparityshards)
+                {
+                    parity_shards = minparityshards;
+                    fecPercentage = (100 * parity_shards) / data_shards;
+                }
+            }
+            else
+            {
+                parity_shards = 0;
             }
             auto nr_shards = data_shards + parity_shards;
             if (nr_shards > DATA_SHARDS_MAX)
@@ -1499,13 +1506,15 @@ namespace video
             }
 
             nShards += nr_shards;
+            //BOOST_LOG(info) << " nr_shards:" << nr_shards << " nShards:" << nShards << " i:" << i;
 
             payload_size -= aligned_size;
         }
 
         const float totalVideoRate = nShards * blocksize * framerate * 8; // bits
 
-        //BOOST_LOG(info) << "for encRate:" << int(encoderRate / 1000) << " => totalVideoRate:" << int(totalVideoRate) / 1000;
+        //BOOST_LOG(info) << "for encRate:" << int(encoderRate / 1000) << " => totalVideoRate:" << int(totalVideoRate) / 1000 << " nShards:" << nShards;
+        nShards *= framerate;
 
         return totalVideoRate;
     }
@@ -1572,14 +1581,12 @@ namespace video
                 auto multi_fec_threshold = 90 * blocksize;
                 const float framerate = 60.0f; // TODO: not hardcoded
                 float totalVideoRate = 0.0f;
-                float additionalVideoRate = rateToSet;
                 float curEncoderRate = rateToSet;
                 do
                 {
-                    totalVideoRate = calcFecVideoRate(curEncoderRate, blocksize, multi_fec_threshold, framerate, config::stream.fec_percentage);
+                    totalVideoRate = calcFecVideoRate(curEncoderRate, blocksize, multi_fec_threshold, framerate, config::stream.fec_percentage, _shards);
                     if (totalVideoRate < rateToSet)
                     {
-                        additionalVideoRate = rateToSet - curEncoderRate;
                         rateToSet = curEncoderRate;
                         break;
                     }
@@ -1589,9 +1596,8 @@ namespace video
 
                 #if 0
                 BOOST_LOG(info)
-                        << " additionalVideoRate:" << int(additionalVideoRate) / 1000
-                        << " + rate:" << int(rateToSet / 1000) << " kbps"
-
+                        << " nShards:" << _shards
+                        << " + rateToSet:" << int(rateToSet / 1000) << " kbps"
                         << " = totalVideoRate:" << int(totalVideoRate / 1000)
                         ;
                 #endif
@@ -1599,8 +1605,6 @@ namespace video
                 const float additionalVideoRate = 2100 * 1000;
                 rateToSet -= additionalVideoRate;
 #endif
-
-                _additionalVideoRate = additionalVideoRate; // for logging only
 
                 rateToSet = std::max(rateToSet, minEncoderRate);
 

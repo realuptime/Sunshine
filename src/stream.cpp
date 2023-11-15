@@ -35,7 +35,7 @@ extern "C" {
 
 namespace video
 {
-    extern float _additionalVideoRate;
+    extern size_t _shards; // computed shards per second
 }
 
 #define IDX_START_A 0
@@ -581,21 +581,24 @@ namespace stream {
 
       auto data_shards = payload_size / blocksize + (pad ? 1 : 0);
 
-#if 1
       auto parity_shards = (data_shards * fecpercentage + 99) / 100;
 
-      // increase the FEC percentage for this frame if the parity shard minimum is not met
-      if (parity_shards < minparityshards) {
-        auto prev_parity_shards = parity_shards;
-        parity_shards = minparityshards;
-        fecpercentage = (100 * parity_shards) / data_shards;
+      if (fecpercentage > 0.0f)
+      {
+          // increase the FEC percentage for this frame if the parity shard minimum is not met
+          if (parity_shards < minparityshards) {
+            auto prev_parity_shards = parity_shards;
+            parity_shards = minparityshards;
+            fecpercentage = (100 * parity_shards) / data_shards;
 
-        BOOST_LOG(debug) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << " data:" << data_shards << " min:" << minparityshards << " parity_shards:" << prev_parity_shards << " payload:" << payload_size << std::endl;
+            BOOST_LOG(debug) << "Increasing FEC percentage to "sv << fecpercentage << " to meet parity shard minimum"sv << " data:" << data_shards << " min:" << minparityshards << " parity_shards:" << prev_parity_shards << " payload:" << payload_size << std::endl;
+          }
       }
-#else
-      int parity_shards = std::max(1, int(minparityshards) - int(data_shards));
-      fecpercentage = (100 * parity_shards) / data_shards;
-#endif
+      else
+      {
+          parity_shards = 0;
+          //BOOST_LOG(info) << "Not using FEC!";
+      }
 
       auto nr_shards = data_shards + parity_shards;
       if (nr_shards > DATA_SHARDS_MAX) {
@@ -619,7 +622,7 @@ namespace stream {
         shards_p[x] = (uint8_t *) &shards[x * blocksize];
       }
 
-      if (data_shards + parity_shards <= DATA_SHARDS_MAX) {
+      if (parity_shards > 0 && data_shards + parity_shards <= DATA_SHARDS_MAX) {
         // packets = parity_shards + data_shards
         rs_t rs { reed_solomon_new(data_shards, parity_shards) };
 
@@ -1287,8 +1290,8 @@ namespace stream {
       int curDataShards = 0;
       size_t curFecPercentage = 0;
       static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
-      static float accumAdditionalVideoRate = 0;
-      static int nAccumAdditionalVideRates = 0;
+      static float accumCompShards = 0;
+      static size_t nAccumCompShards = 0;
 
       try {
         auto blockIndex = 0;
@@ -1402,8 +1405,8 @@ namespace stream {
 #if 1
           accumTransSize += curTransSize;
           accumPayloadSize += int(packet->data_size());
-          accumAdditionalVideoRate += video::_additionalVideoRate / 1000.0f; // kbps
-          nAccumAdditionalVideRates++;
+          accumCompShards += video::_shards;
+          nAccumCompShards++;
           nPackets++;
           nShards += curNShards;
 
@@ -1417,48 +1420,48 @@ namespace stream {
 
               accumTransSize /= nsec;
               accumPayloadSize /= nsec;
-              if (nAccumAdditionalVideRates > 0)
-                  accumAdditionalVideoRate /= nAccumAdditionalVideRates;
+              if (nAccumCompShards > 0)
+                  accumCompShards /= nAccumCompShards;
 
               const float screamTargetRate = scream::GetTargetBitrate(VIDEO_SSRC);
               const int additionalData = accumTransSize - accumPayloadSize;
               const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
-              const float additionalCompDataPrc = accumTransSize ? ((accumAdditionalVideoRate * 1000.0f / 8.0f * 100.0f) / accumTransSize) : 0.0f;
               const int encRateKBits = video::getEncoderRate() / 1000;
               const int accumPayloadKBits = accumPayloadSize * 8 / 1000;
-              printf("SCREAM: BS:%d NP:%d shards:%d/T:%d/D:%d/P:%d PS:%.1f"
-                " fecPercentage:%d/%zu"
-                " fecRate:%d/%.0f + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d minFec:%d additionalPrc:%.1f%%/%.1f%%"
+              printf("BS:%d NP:%d shards:%d/%.0f"
+                " T:%d/D:%d/P:%d PS:%.1f"
+                " fecPercentage:%d/%zu MPF:%d"
+                " accumRate:%d(%.1f%%) + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d"
                 "\n"
                 ,
                 blocksize, // block size
                 nPackets, // number of frame per second
                 nShards, // number of shards per second
+                accumCompShards, // number of computed shards per second
                 curNShards, // number of shards (data + parity) for the last packet
                 curDataShards, // number of data shards for the last packets
                 curNShards - curDataShards,
                 packet->data_size() * 8 / 1000.0f, // packet size
                 fecPercentage, // configured FEC percentage
                 curFecPercentage, // last FEC percentage used, could be different / adjusted to the once configured
+                session->config.minRequiredFecPackets, // min FEC packets comming from the client
                 additionalData * 8 / 1000, // additional data in kbps
-                accumAdditionalVideoRate, // computed additional data kbps
+                additionalDataPrc, // percent of additional data
                 accumPayloadKBits, // payload in kbps, which is encoder rate
                 encRateKBits, // the current encoder rate
                 encRateKBits - accumPayloadKBits, // diff between payload rate and encoder rate
                 accumTransSize * 8 / 1000, // actual send rate
                 int(screamTargetRate / 1000), // scream target rate
-                (accumTransSize * 8 / 1000) - int(screamTargetRate / 1000), // diff between actual send rate and scream target rate
-                session->config.minRequiredFecPackets, // min FEC packets comming from the client
-                additionalDataPrc, // percent of additional data
-                additionalCompDataPrc // percent of the computed additional data
+                (accumTransSize * 8 / 1000) - int(screamTargetRate / 1000) // diff between actual send rate and scream target rate
               );
 
               accumTransSize = 0;
               accumPayloadSize = 0;
               nPackets = 0;
               nShards = 0;
-              accumAdditionalVideoRate = 0;
-              nAccumAdditionalVideRates = 0;
+
+              accumCompShards = 0;
+              nAccumCompShards = 0;
           }
 #endif
 

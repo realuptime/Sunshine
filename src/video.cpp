@@ -37,6 +37,7 @@ namespace video
 {
 
     size_t _shards = 0;
+    float _targetRate = 0;
 
     using millis = std::chrono::milliseconds;
 
@@ -1450,74 +1451,6 @@ namespace video
     return 0;
   }
 
-    float calcFecVideoRate(float encoderRate, int blocksize, int multi_fec_threshold, float framerate, size_t fecPercentage, size_t &nShards)
-    {
-        const int encoderPacketSize = (encoderRate / 8) / framerate + 8; // sizeof(video_short_frame_header_t) == 8
-
-        constexpr size_t DATA_SHARDS_MAX = 255;
-        // Align individual fec blocks to blocksize
-        nShards = 0;
-        int aligned_size = 0;
-        int maxFecBlocks = 0;
-        if (encoderPacketSize > multi_fec_threshold)
-        {
-            // 3 FEC blocks
-            constexpr size_t MAX_FEC_BLOCKS = 3;
-            maxFecBlocks = MAX_FEC_BLOCKS;
-            auto unaligned_size = encoderPacketSize / MAX_FEC_BLOCKS;
-            aligned_size = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
-        }
-        else
-        {
-            // 1 single FEC block
-            maxFecBlocks = 1;
-            aligned_size = encoderPacketSize;
-        }
-
-        int payload_size = encoderPacketSize;
-        for (int i = 0; i < maxFecBlocks; ++i)
-        {
-            int fec_block_size = payload_size >= aligned_size ? aligned_size : payload_size - aligned_size;
-            if (fec_block_size <= 0)
-                break;
-
-            const bool pad = fec_block_size % blocksize != 0;
-            auto data_shards = fec_block_size / blocksize + (pad ? 1 : 0);
-            auto parity_shards = (data_shards * fecPercentage + 99) / 100;
-
-            if (fecPercentage > 0.0f)
-            {
-                const size_t minparityshards = 2;
-                if (parity_shards < minparityshards)
-                {
-                    parity_shards = minparityshards;
-                    fecPercentage = (100 * parity_shards) / data_shards;
-                }
-            }
-            else
-            {
-                parity_shards = 0;
-            }
-            auto nr_shards = data_shards + parity_shards;
-            if (nr_shards > DATA_SHARDS_MAX)
-            {
-                nr_shards = data_shards;
-                fecPercentage = 0;
-            }
-
-            nShards += nr_shards;
-            //BOOST_LOG(info) << " nr_shards:" << nr_shards << " nShards:" << nShards << " i:" << i;
-
-            payload_size -= aligned_size;
-        }
-
-        const float totalVideoRate = nShards * blocksize * framerate * 8; // bits
-
-        //BOOST_LOG(info) << "for encRate:" << int(encoderRate / 1000) << " => totalVideoRate:" << int(totalVideoRate) / 1000 << " nShards:" << nShards;
-        nShards *= framerate;
-
-        return totalVideoRate;
-    }
 
   int
   encode_nvenc(int64_t frame_nr, nvenc_encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp) {
@@ -1564,9 +1497,10 @@ namespace video
         {
             _lastTimeEncoderWasSet = GetTimeInMilliseconds();
 
-            float rateToSet = scream::GetTargetBitrate(VIDEO_SSRC);
-            if (rateToSet > 0.0f)
+            _targetRate = scream::GetTargetBitrate(VIDEO_SSRC);
+            if (_targetRate > 0.0f)
             {
+                float rateToSet = _targetRate;
                 const float controlRate = 400 * 1000; // bits
                 const float audioRate = 100 * 1000; // bits
 
@@ -1576,31 +1510,46 @@ namespace video
                 rateToSet = std::max(rateToSet - (audioRate + controlRate), minEncoderRate);
 
 #if 1
+
                 // TODO: get the blocksize from stream.cpp
-                const int blocksize = 1408; // session.config.packetsize + MAX_RTP_HEADER_SIZE
-                auto multi_fec_threshold = 90 * blocksize;
                 const float framerate = 60.0f; // TODO: not hardcoded
                 float totalVideoRate = 0.0f;
                 float curEncoderRate = rateToSet;
+                float accumFec = 0.0f;
                 do
                 {
-                    totalVideoRate = calcFecVideoRate(curEncoderRate, blocksize, multi_fec_threshold, framerate, config::stream.fec_percentage, _shards);
+                    const float encoderPacketSize = curEncoderRate / framerate * 1.05f;
+
+                    size_t shards = 0;
+                    totalVideoRate = stream::calcFecForVideoPacket(shards, encoderPacketSize / 8, config::stream.fec_percentage);
+                    totalVideoRate *= framerate;
                     if (totalVideoRate < rateToSet)
                     {
+                        accumFec = totalVideoRate - curEncoderRate;
+
                         rateToSet = curEncoderRate;
+                        _shards = shards * framerate;
+
+                        #if 0
+                        char buf[255];
+                        snprintf(&buf[0], sizeof(buf), "%.1f", encoderPacketSize / 1000);
+                        BOOST_LOG(info)
+                                << " nShards:" << _shards
+                                << " targetRate:" << int(_targetRate / 1000) << " kbps"
+                                << " - rateToSet:" << int(rateToSet / 1000) << " kbps"
+                                << " = " << int((_targetRate - rateToSet) / 1000)
+                                //<< " totalVideoRate " << int(totalVideoRate / 1000)
+                                << " accumFec:" << int(accumFec / 1000)
+                                << " PS:" << buf
+                                ;
+                        #endif
+
                         break;
                     }
-                    curEncoderRate -= 100 * 1000.0f; // decrease by 1kbps
+                    curEncoderRate -= 100 * 1000.0f; // decrease by 100kbps
                 }
-                while (true);
+                while (curEncoderRate > 0);
 
-                #if 0
-                BOOST_LOG(info)
-                        << " nShards:" << _shards
-                        << " + rateToSet:" << int(rateToSet / 1000) << " kbps"
-                        << " = totalVideoRate:" << int(totalVideoRate / 1000)
-                        ;
-                #endif
 #else
                 const float additionalVideoRate = 2100 * 1000;
                 rateToSet -= additionalVideoRate;

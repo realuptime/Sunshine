@@ -36,6 +36,7 @@ extern "C" {
 namespace video
 {
     extern size_t _shards; // computed shards per second
+    extern float _targetRate;
 }
 
 #define IDX_START_A 0
@@ -225,6 +226,8 @@ namespace stream {
   };
 
 #pragma pack(pop)
+
+
 
   constexpr std::size_t
   round_to_pkcs7_padded(std::size_t size) {
@@ -684,6 +687,88 @@ namespace stream {
 
     return replaced;
   }
+
+    float calcFecForVideoPacket(
+        size_t &nShards,
+        size_t encoderPacketSize,
+        size_t fecPercentage,
+        int blocksize, // session.config.packetsize + MAX_RTP_HEADER_SIZE
+        int multi_fec_threshold_multiplier,
+        size_t minparityshards)
+    {
+      if (encoderPacketSize < 0)
+      {
+          BOOST_LOG(info) << "negative encoderPacketSize " << encoderPacketSize;
+          return 0.0f;
+      }
+
+      std::string payloadStr(encoderPacketSize, 0);
+
+      std::string_view payload { payloadStr.data(), payloadStr.size() };
+
+      video_short_frame_header_t frame_header = {};
+
+      std::vector<uint8_t> payload_new;
+      std::copy_n((uint8_t *) &frame_header, sizeof(frame_header), std::back_inserter(payload_new));
+      std::copy(std::begin(payload), std::end(payload), std::back_inserter(payload_new));
+
+      payload = { (char *) payload_new.data(), payload_new.size() };
+
+      // insert packet headers
+      //auto blocksize = session->config.packetsize + MAX_RTP_HEADER_SIZE;
+      auto payload_blocksize = blocksize - sizeof(video_packet_raw_t);
+
+      //auto fecPercentage = config::stream.fec_percentage;
+
+      payload_new = insert(sizeof(video_packet_raw_t), payload_blocksize,
+        payload, [&](void *p, int fecIndex, int end) {});
+
+      payload = std::string_view { (char *) payload_new.data(), payload_new.size() };
+
+      // With a fecpercentage of 255, if payload_new is broken up into more than a 100 data_shards
+      // it will generate greater than DATA_SHARDS_MAX shards.
+      // Therefore, we start breaking the data up into three separate fec blocks.
+      auto multi_fec_threshold = 90 * blocksize;
+
+      // We can go up to 4 fec blocks, but 3 is plenty
+      constexpr auto MAX_FEC_BLOCKS = 3;
+
+      std::array<std::string_view, MAX_FEC_BLOCKS> fec_blocks;
+      decltype(fec_blocks)::iterator
+        fec_blocks_begin = std::begin(fec_blocks),
+        fec_blocks_end = std::begin(fec_blocks) + 1;
+
+      if (payload.size() > multi_fec_threshold) {
+        //BOOST_LOG(verbose) << "Generating multiple FEC blocks"sv;
+
+        // Align individual fec blocks to blocksize
+        auto unaligned_size = payload.size() / MAX_FEC_BLOCKS;
+        auto aligned_size = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
+
+        // Break the data up into 3 blocks, each containing multiple complete video packets.
+        fec_blocks[0] = payload.substr(0, aligned_size);
+        fec_blocks[1] = payload.substr(aligned_size, aligned_size);
+        fec_blocks[2] = payload.substr(aligned_size * 2);
+        fec_blocks_end = std::end(fec_blocks);
+      }
+      else {
+        //BOOST_LOG(verbose) << "Generating single FEC block"sv;
+        fec_blocks[0] = payload;
+      }
+
+      std::for_each(fec_blocks_begin, fec_blocks_end, [&](std::string_view &current_payload) {
+        const size_t minparityshards = 2;
+        auto shards = fec::encode(current_payload, blocksize, fecPercentage, minparityshards);
+        nShards += shards.size();
+      });
+
+
+      const float videoRate = nShards * blocksize * 8; // bits
+      //BOOST_LOG(info) << "for encRate:" << int(encoderRate / 1000) << " => totalVideoRate:" << int(totalVideoRate) / 1000 << " nShards:" << nShards;
+
+      return videoRate;
+    }
+
 
   /**
    * @brief Pass gamepad feedback data back to the client.
@@ -1226,6 +1311,9 @@ namespace stream {
       std::copy_n((uint8_t *) &frame_header, sizeof(frame_header), std::back_inserter(payload_new));
       std::copy(std::begin(payload), std::end(payload), std::back_inserter(payload_new));
 
+      static int accumPadding = 0;
+      //accumPadding += payload_new.size() - payload.size();
+
       payload = { (char *) payload_new.data(), payload_new.size() };
 
       // insert packet headers
@@ -1241,6 +1329,7 @@ namespace stream {
           video_packet->packet.flags = FLAG_CONTAINS_PIC_DATA;
         });
 
+      //accumPadding += payload_new.size() - payload.size();
       payload = std::string_view { (char *) payload_new.data(), payload_new.size() };
 
       // With a fecpercentage of 255, if payload_new is broken up into more than a 100 data_shards
@@ -1318,6 +1407,7 @@ namespace stream {
           }
 
           auto shards = fec::encode(current_payload, blocksize, fecPercentage, session->config.minRequiredFecPackets);
+          accumPadding += (current_payload.size() % blocksize) ? blocksize : 0;
 
           curFecPercentage = shards.percentage;
 
@@ -1420,10 +1510,13 @@ namespace stream {
 
               accumTransSize /= nsec;
               accumPayloadSize /= nsec;
+              accumPadding /= nsec;
               if (nAccumCompShards > 0)
                   accumCompShards /= nAccumCompShards;
 
               const float screamTargetRate = scream::GetTargetBitrate(VIDEO_SSRC);
+              //const float screamTargetRate = video::_targetRate;
+
               const int additionalData = accumTransSize - accumPayloadSize;
               const float additionalDataPrc = accumTransSize ? (additionalData * 100.0f / accumTransSize) : 0.0f;
               const int encRateKBits = video::getEncoderRate() / 1000;
@@ -1431,7 +1524,7 @@ namespace stream {
               printf("BS:%d NP:%d shards:%d/%.0f"
                 " T:%d/D:%d/P:%d PS:%.1f"
                 " fecPercentage:%d/%zu MPF:%d"
-                " accumRate:%d(%.1f%%) + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d"
+                " accumRate:%d(%.1f%% pad:%d) + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d"
                 "\n"
                 ,
                 blocksize, // block size
@@ -1441,15 +1534,17 @@ namespace stream {
                 curNShards, // number of shards (data + parity) for the last packet
                 curDataShards, // number of data shards for the last packets
                 curNShards - curDataShards,
-                packet->data_size() * 8 / 1000.0f, // packet size
+                //packet->data_size() * 8 / 1000.0f, // packet size
+                (nPackets > 0 ? float(accumPayloadKBits) / nPackets : 0.0f),
                 fecPercentage, // configured FEC percentage
                 curFecPercentage, // last FEC percentage used, could be different / adjusted to the once configured
                 session->config.minRequiredFecPackets, // min FEC packets comming from the client
                 additionalData * 8 / 1000, // additional data in kbps
                 additionalDataPrc, // percent of additional data
+                accumPadding * 8 / 1000, // padding per second
                 accumPayloadKBits, // payload in kbps, which is encoder rate
                 encRateKBits, // the current encoder rate
-                encRateKBits - accumPayloadKBits, // diff between payload rate and encoder rate
+                accumPayloadKBits - encRateKBits, // diff between payload rate and encoder rate
                 accumTransSize * 8 / 1000, // actual send rate
                 int(screamTargetRate / 1000), // scream target rate
                 (accumTransSize * 8 / 1000) - int(screamTargetRate / 1000) // diff between actual send rate and scream target rate
@@ -1457,6 +1552,7 @@ namespace stream {
 
               accumTransSize = 0;
               accumPayloadSize = 0;
+              accumPadding = 0;
               nPackets = 0;
               nShards = 0;
 

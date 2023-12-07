@@ -536,27 +536,6 @@ main(int argc, char *argv[]) {
     else {
       BOOST_LOG(verbose) << buffer;
     }
-
-    av_log_format_line(ptr, level, fmt, vl, buffer, sizeof(buffer), &print_prefix);
-    if (level <= AV_LOG_FATAL) {
-      BOOST_LOG(fatal) << buffer;
-    }
-    else if (level <= AV_LOG_ERROR) {
-      BOOST_LOG(error) << buffer;
-    }
-    else if (level <= AV_LOG_WARNING) {
-      BOOST_LOG(warning) << buffer;
-    }
-    else if (level <= AV_LOG_INFO) {
-      BOOST_LOG(info) << buffer;
-    }
-    else if (level <= AV_LOG_VERBOSE) {
-      // AV_LOG_VERBOSE is less verbose than AV_LOG_DEBUG
-      BOOST_LOG(debug) << buffer;
-    }
-    else {
-      BOOST_LOG(verbose) << buffer;
-    }
   });
 
   // TEST: use verbose avcodec logging

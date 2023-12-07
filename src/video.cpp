@@ -2464,7 +2464,6 @@ namespace video
     auto packets = mail::man->queue<packet_t>(mail::video_packets);
     bool needIDR = false;
     while (!packets->peek()) {
-      bool needIDR = false;
       if (encode(1, *session, packets, nullptr, {}, needIDR)) {
         BOOST_LOG(error) << "encode failed";
         return -1;
@@ -2915,21 +2914,6 @@ namespace video
 
     return hw_device_buf;
   }
-
-  util::Either<avcodec_buffer_t, int>
-  vt_init_avcodec_hardware_input_buffer(platf::avcodec_encode_device_t *encode_device) {
-    avcodec_buffer_t hw_device_buf;
-
-    auto status = av_hwdevice_ctx_create(&hw_device_buf, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nullptr, nullptr, 0);
-    if (status < 0) {
-      char string[AV_ERROR_MAX_STRING_SIZE];
-      BOOST_LOG(error) << "Failed to create a VideoToolbox device: "sv << av_make_error_string(string, AV_ERROR_MAX_STRING_SIZE, status);
-      return -1;
-    }
-
-    return hw_device_buf;
-  }
-
 #ifdef _WIN32
 } // namespace video
 

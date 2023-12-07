@@ -476,13 +476,13 @@ void StopStreaming(uint32_t ssrc)
 	}
 }
 
-bool SetECT(int sock, int value)
+bool SetECT(int sock, int value, bool ipv6)
 {
     int iptos = 0;
 
     // Get current TOS value
     socklen_t toslen = sizeof(iptos);
-    int retVal = getsockopt(sock, IPPROTO_IP, IP_TOS,  &iptos, &toslen);
+    int retVal = getsockopt(sock, ipv6 ? IPPROTO_IPV6 : IPPROTO_IP, ipv6 ? IPV6_TCLASS : IP_TOS,  &iptos, &toslen);
     if (retVal < 0)
     {
         printf("ECN: ERR: Failed to get TOS marking on socket %d. err:%d\n", sock, retVal);
@@ -496,8 +496,8 @@ bool SetECT(int sock, int value)
     // Set ECT on the last two bits
     iptos = (iptos & 0xFC) | value;
 
-    printf("ECN: Setting tos to %d\n", iptos);
-    retVal = setsockopt(sock, IPPROTO_IP, IP_TOS, &iptos, sizeof(iptos));
+    printf("ECN: Setting tos to %d ipv6:%d\n", iptos, ipv6);
+    retVal = setsockopt(sock, ipv6 ? IPPROTO_IPV6 : IPPROTO_IP, ipv6 ? IPV6_TCLASS : IP_TOS, &iptos, sizeof(iptos));
     if (retVal < 0)
     {
         printf("ECN: ERR: Not possible to set ECN bits. retVal:%d \n", retVal);

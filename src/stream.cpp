@@ -1871,7 +1871,8 @@ namespace stream {
     }
 
     // SET ECN bits
-    scream::SetECT((int)ref->video_sock.native_handle(), 1);
+    scream::SetECT((int)ref->video_sock.native_handle(), 1, false); // ipv4
+    scream::SetECT((int)ref->video_sock.native_handle(), 1, true);  // ipv6
 
     BOOST_LOG(debug) << "Start capturing Video"sv;
     video::capture(session->mail, session->config.monitor, session);

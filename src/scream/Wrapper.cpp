@@ -53,7 +53,6 @@ bool disablePacing = 0;
 int initRate = 700;
 int minRate = 700;
 
-//int maxRate = 20000;
 int maxRate = 8000;
 
 bool enableClockDriftCompensation = false;
@@ -446,8 +445,14 @@ void StartStreaming(uint32_t ssrc, const boost::asio::ip::udp::endpoint &peer, b
 	stopThread = false;
 	transmitThread = std::thread { transmitRtpThread, std::ref(sock), peer };
 
+
+	if (screamTx)
+	{
+		screamTx->updateBitrateStream(VIDEO_SSRC, minRate * 1000, maxRate * 1000);
+	}
+
 #if 0
-    stopLogThread = false;
+    	stopLogThread = false;
 	logThread = std::thread { logThreadProc };
 #endif
 }
@@ -505,6 +510,14 @@ bool SetECT(int sock, int value, bool ipv6)
     }
 
     return true;
+}
+
+
+void SetMaxBitrate(int value)
+{
+	maxRate = std::max(1000, value);
+	minRate = std::clamp(minRate, 1000, maxRate);
+	printf("SCREAM: SetMaxBitrate: v:%d m:%d M:%d\n", value, minRate, maxRate);
 }
 
 

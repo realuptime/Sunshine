@@ -1451,6 +1451,7 @@ namespace video
     return 0;
   }
 
+
   int
   encode(int64_t frame_nr, encode_session_t &session, safe::mail_raw_t::queue_t<packet_t> &packets, void *channel_data, std::optional<std::chrono::steady_clock::time_point> frame_timestamp, bool &needIDR) {
 
@@ -1928,6 +1929,7 @@ namespace video
       BOOST_LOG(info) << "Color range: ["sv << (encode_device->colorspace.full_range ? "JPEG"sv : "MPEG"sv) << ']';
     }
 
+    scream::SetMaxBitrate(config.bitrate);
 
     if (dynamic_cast<platf::avcodec_encode_device_t *>(encode_device.get())) {
       auto avcodec_encode_device = boost::dynamic_pointer_cast<platf::avcodec_encode_device_t>(std::move(encode_device));
@@ -2914,6 +2916,7 @@ namespace video
 
     return hw_device_buf;
   }
+
 #ifdef _WIN32
 } // namespace video
 

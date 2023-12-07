@@ -29,9 +29,6 @@ namespace cuda {
   std::unique_ptr<platf::avcodec_encode_device_t>
   make_avcodec_encode_device(int width, int height, bool vram);
 
-  //std::unique_ptr<platf::nvenc_encode_device_t>
-  //make_nvenc_encode_device(int pix_fmt); // platf::pix_fmt_e
-
   int init();
 }  // namespace cuda
 

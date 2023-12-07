@@ -31,8 +31,6 @@ extern "C" {
 
 #include "scream/Wrapper.h"
 
-
-
 namespace video
 {
     extern size_t _shards; // computed shards per second
@@ -1950,7 +1948,7 @@ namespace stream {
       input::reset(session.input);
 
       // Stop scream, no lock do avoid deadlock
-	  scream::StopStreaming(VIDEO_SSRC);
+      scream::StopStreaming(VIDEO_SSRC);
 
       BOOST_LOG(debug) << "Removing references to any connections..."sv;
       {

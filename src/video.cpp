@@ -1929,7 +1929,16 @@ namespace video
       BOOST_LOG(info) << "Color range: ["sv << (encode_device->colorspace.full_range ? "JPEG"sv : "MPEG"sv) << ']';
     }
 
+#if 1
+    // use directly x-ml-video.configuredBitrateKbps from announce command (not adjusted)
     scream::SetMaxBitrate(config.bitrate);
+#else
+    // in case x-ml-video.configuredBitrateKbps is missing from announce command,
+    // use Moonlight adjusted bitrate (x-nv-vqos[0].bw.maximumBitrateKbps from announce command)
+    // Moonlight adjusted bitrate: substract 20% for FEC and in case of remote connection, also substract 500 Kbps for audio and control
+    // In our case with sunsine running on a remote/internet server, the connection is detected as LOCAL instead of REMOTE, so we substract 0 for audio and control
+    scream::SetMaxBitrate((int)((config.bitrate + 000.0f) * 1.25f));
+#endif
 
     if (dynamic_cast<platf::avcodec_encode_device_t *>(encode_device.get())) {
       auto avcodec_encode_device = boost::dynamic_pointer_cast<platf::avcodec_encode_device_t>(std::move(encode_device));

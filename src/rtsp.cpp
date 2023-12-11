@@ -686,6 +686,15 @@ namespace rtsp_stream {
       config.monitor.encoderCscMode = util::from_view(args.at("x-nv-video[0].encoderCscMode"sv));
       config.monitor.videoFormat = util::from_view(args.at("x-nv-vqos[0].bitStreamFormat"sv));
       config.monitor.dynamicRange = util::from_view(args.at("x-nv-video[0].dynamicRangeMode"sv));
+
+      try
+      {
+         config.monitor.bitrate = util::from_view(args.at("x-ml-video.configuredBitrateKbps"sv));
+	 BOOST_LOG(info) << "Using video bitrate from x-ml-video.configuredBitrateKbps";
+      }
+      catch (std::out_of_range &) {
+	 BOOST_LOG(info) << "x-ml-video.configuredBitrateKbps not present in announce command";
+      }
     }
     catch (std::out_of_range &) {
       respond(sock, &option, 400, "BAD REQUEST", req->sequenceNumber, {});

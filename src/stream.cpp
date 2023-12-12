@@ -35,6 +35,7 @@ namespace video
 {
     extern size_t _shards; // computed shards per second
     extern float _targetRate;
+    extern float _lastPacketSize;
 }
 
 #define IDX_START_A 0
@@ -767,6 +768,118 @@ namespace stream {
       return videoRate;
     }
 
+#if 1
+    int chunkSize(int size, int start, int count)
+    {
+        if (size <= 0) return 0;
+        if (start >= size) return 0;
+        if (start + count >= size) count = size - start;
+        return count;
+    }
+
+    float calcFecForVideoPacketFast(
+        size_t &nShards,
+        size_t encoderPacketSize,
+        size_t fecPercentage,
+        int blocksize, // session.config.packetsize + MAX_RTP_HEADER_SIZE
+        int multi_fec_threshold_multiplier,
+        size_t minparityshards)
+    {
+        if (encoderPacketSize < 0)
+        {
+            BOOST_LOG(info) << "negative encoderPacketSize " << encoderPacketSize;
+            return 0.0f;
+        }
+
+        // 1. Add frame header of type video_short_frame_header_t
+        encoderPacketSize += sizeof(video_short_frame_header_t);
+
+        // 2. Insert packet headers: add video_packet_raw_t for each video packet of max size payload_blocksize
+        // Simulate insert() function
+        auto payload_blocksize = blocksize - sizeof(video_packet_raw_t);
+        auto pad = encoderPacketSize % payload_blocksize != 0;
+        auto elements = encoderPacketSize / payload_blocksize + (pad ? 1 : 0);
+        encoderPacketSize += elements * sizeof(video_packet_raw_t);
+
+        // 3. Align individual fec blocks to blocksize
+        auto multi_fec_threshold = multi_fec_threshold_multiplier * blocksize;
+        constexpr size_t MAX_FEC_BLOCKS = 3;
+        int fec_block_sizes[MAX_FEC_BLOCKS];
+        memset(&fec_block_sizes[0], 0, sizeof(fec_block_sizes));
+        fec_block_sizes[0] = fec_block_sizes[1] = fec_block_sizes[2] = 0;
+        if (encoderPacketSize > multi_fec_threshold)
+        {
+            // Max 3 FEC blocks
+            auto unaligned_size = encoderPacketSize / MAX_FEC_BLOCKS;
+            int aligned_size = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
+
+            fec_block_sizes[0] = chunkSize(encoderPacketSize, 0, aligned_size);
+            fec_block_sizes[1] = chunkSize(encoderPacketSize, aligned_size, aligned_size);
+            fec_block_sizes[2] = chunkSize(encoderPacketSize, aligned_size * 2, encoderPacketSize);
+
+#if 0
+            std::string payload;
+            payload.resize(encoderPacketSize);
+            auto x = payload.substr(0, aligned_size).size();
+            auto y = payload.substr(aligned_size, aligned_size).size();
+            auto z = payload.substr(aligned_size * 2).size();
+            if (fec_block_sizes[0] != x) BOOST_LOG(warning) << "Wrong x: " << fec_block_sizes[0] << " " << x;
+            if (fec_block_sizes[1] != y) BOOST_LOG(warning) << "Wrong y: " << fec_block_sizes[1] << " " << y;
+            if (fec_block_sizes[2] != z) BOOST_LOG(warning) << "Wrong z: " << fec_block_sizes[2] << " " << z;
+#endif
+
+            //BOOST_LOG(info) << "multiblock [" << fec_block_sizes[0] << " " << fec_block_sizes[1] << " " << fec_block_sizes[2] << "] PS:" << encoderPacketSize << " AS:" << aligned_size;
+        }
+        else
+        {
+            // 1 single FEC block
+            fec_block_sizes[0] = encoderPacketSize;
+        }
+
+        // 4. Simulate fec::encode for each non-empty FEC block
+        // We are interested in the number of shards of size blocksize
+        for (const int &fec_block_size : fec_block_sizes)
+        {
+            // If fec block has no size, stop
+            if (fec_block_size <= 0)
+                break;
+
+            const bool pad = fec_block_size % blocksize != 0;
+            auto data_shards = fec_block_size / blocksize + (pad ? 1 : 0);
+            auto parity_shards = (data_shards * fecPercentage + 99) / 100;
+
+            if (fecPercentage > 0.0f)
+            {
+                if (parity_shards < minparityshards)
+                {
+                    parity_shards = minparityshards;
+                    fecPercentage = (100 * parity_shards) / data_shards;
+                }
+            }
+            else
+            {
+                parity_shards = 0;
+                //BOOST_LOG(info) << "Not using FEC!";
+            }
+            auto nr_shards = data_shards + parity_shards;
+            if (nr_shards > DATA_SHARDS_MAX)
+            {
+                nr_shards = data_shards;
+                fecPercentage = 0;
+            }
+
+            nShards += nr_shards;
+            //BOOST_LOG(info) << "D:" << data_shards << " P:" << parity_shards << " SZ:" << encoderPacketSize;
+        }
+
+        // 5. Return aproximated packet size with FEC and padding in bits using the shards already calculated
+        const float totalVideoRate = nShards * blocksize * 8; // bits
+
+        //BOOST_LOG(info) << "for encRate:" << int(encoderRate / 1000) << " => totalVideoRate:" << int(totalVideoRate) / 1000;
+
+        return totalVideoRate;
+    }
+#endif
 
   /**
    * @brief Pass gamepad feedback data back to the client.
@@ -1351,6 +1464,8 @@ namespace stream {
         auto unaligned_size = payload.size() / MAX_FEC_BLOCKS;
         auto aligned_size = ((unaligned_size + (blocksize - 1)) / blocksize) * blocksize;
 
+        //BOOST_LOG(info) << " AS: " << aligned_size;
+
         // Break the data up into 3 blocks, each containing multiple complete video packets.
         fec_blocks[0] = payload.substr(0, aligned_size);
         fec_blocks[1] = payload.substr(aligned_size, aligned_size);
@@ -1366,7 +1481,8 @@ namespace stream {
 
 #if 0
       BOOST_LOG(info)
-        << "fec_blocks[0]:" << fec_blocks[0].size()
+        << "payload: " << payload.size()
+        << " fec_blocks[0]:" << fec_blocks[0].size()
         << " fec_blocks[1]:" << fec_blocks[1].size()
         << " fec_blocks[2]:" << fec_blocks[2].size()
         ;
@@ -1376,9 +1492,11 @@ namespace stream {
       int curNShards = 0;
       int curDataShards = 0;
       size_t curFecPercentage = 0;
-      static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, nShards = 0;
+      static int accumTransSize = 0, accumPayloadSize = 0, nPackets = 0, _nShards = 0;
       static float accumCompShards = 0;
       static size_t nAccumCompShards = 0;
+      static float accumCompPacketSize = 0;
+      static size_t nAccumCompPacketSize = 0;
 
       try {
         auto blockIndex = 0;
@@ -1434,6 +1552,8 @@ namespace stream {
           }
           curNShards += shards.nr_shards;
           curDataShards += shards.data_shards;
+
+          //BOOST_LOG(info) << "nshards " << shards.nr_shards << " for " << current_payload.size();
 
 #if 0
           auto peer_address = session->video.peer.address();
@@ -1495,8 +1615,10 @@ namespace stream {
           accumPayloadSize += int(packet->data_size());
           accumCompShards += video::_shards;
           nAccumCompShards++;
+          accumCompPacketSize += video::_lastPacketSize;
+          nAccumCompPacketSize++;
           nPackets++;
-          nShards += curNShards;
+          _nShards += curNShards;
 
           static time_t last = time(0);
           const time_t now = time(0);
@@ -1511,6 +1633,10 @@ namespace stream {
               accumPadding /= nsec;
               if (nAccumCompShards > 0)
                   accumCompShards /= nAccumCompShards;
+              accumCompShards /= nsec;
+              if (nAccumCompPacketSize > 0)
+                  accumCompPacketSize /= nAccumCompPacketSize;
+              accumCompPacketSize /= nsec;
 
               const float screamTargetRate = scream::GetTargetBitrate(VIDEO_SSRC);
               //const float screamTargetRate = video::_targetRate;
@@ -1520,20 +1646,21 @@ namespace stream {
               const int encRateKBits = video::getEncoderRate() / 1000;
               const int accumPayloadKBits = accumPayloadSize * 8 / 1000;
               printf("BS:%d NP:%d shards:%d/%.0f"
-                " T:%d/D:%d/P:%d PS:%.1f"
+                " T:%d/D:%d/P:%d PS:%.1f/%.1f"
                 " fecPercentage:%d/%zu MPF:%d"
                 " accumRate:%d(%.1f%% pad:%d) + encRate:%d/%d/diff:%d = sendRate:%d target:%d diff:%d"
                 "\n"
                 ,
                 blocksize, // block size
                 nPackets, // number of frame per second
-                nShards, // number of shards per second
+                _nShards, // number of shards per second
                 accumCompShards, // number of computed shards per second
                 curNShards, // number of shards (data + parity) for the last packet
                 curDataShards, // number of data shards for the last packets
                 curNShards - curDataShards,
                 //packet->data_size() * 8 / 1000.0f, // packet size
                 (nPackets > 0 ? float(accumPayloadKBits) / nPackets : 0.0f),
+                accumCompPacketSize / 1000,
                 fecPercentage, // configured FEC percentage
                 curFecPercentage, // last FEC percentage used, could be different / adjusted to the once configured
                 session->config.minRequiredFecPackets, // min FEC packets comming from the client
@@ -1552,10 +1679,12 @@ namespace stream {
               accumPayloadSize = 0;
               accumPadding = 0;
               nPackets = 0;
-              nShards = 0;
+              _nShards = 0;
 
               accumCompShards = 0;
               nAccumCompShards = 0;
+              accumCompPacketSize = 0;
+              nAccumCompPacketSize = 0;
           }
 #endif
 

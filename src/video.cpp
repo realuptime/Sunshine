@@ -38,6 +38,7 @@ namespace video
 
     size_t _shards = 0;
     float _targetRate = 0;
+    float _lastPacketSize = 0;
 
     using millis = std::chrono::milliseconds;
 
@@ -1489,49 +1490,46 @@ namespace video
                 rateToSet = std::max(rateToSet - (audioRate + controlRate), minEncoderRate);
 
 #if 1
-
                 // TODO: get the blocksize from stream.cpp
+                const int blocksize = 1408;
                 const float framerate = 60.0f; // TODO: not hardcoded
-                float totalVideoRate = 0.0f;
+
+                _shards = 0;
                 float curEncoderRate = rateToSet;
-                float accumFec = 0.0f;
                 do
                 {
-                    const float encoderPacketSize = curEncoderRate / framerate * 1.05f;
-
                     size_t shards = 0;
-                    totalVideoRate = stream::calcFecForVideoPacket(shards, encoderPacketSize / 8, config::stream.fec_percentage);
+                    float encoderPacketSize = curEncoderRate / framerate;
+
+#if 0
+                    // calcFecForVideoPacket actually uses dummy video packets to aproximate the video rate
+                    // On higher encoding rates, it performs poor and drops FTS
+                    encoderPacketSize *= 1.05f; // 5% to be sure
+                    float totalVideoRate = stream::calcFecForVideoPacket(shards, encoderPacketSize / 8, config::stream.fec_percentage, blocksize);
+#else
+                    //encoderPacketSize *= 1.05f; // 5% to be sure
+                    float totalVideoRate = stream::calcFecForVideoPacketFast(shards, encoderPacketSize / 8, config::stream.fec_percentage, blocksize);
+#endif
                     totalVideoRate *= framerate;
                     if (totalVideoRate < rateToSet)
                     {
-                        accumFec = totalVideoRate - curEncoderRate;
-
-                        rateToSet = curEncoderRate;
+                        _lastPacketSize = encoderPacketSize;
                         _shards = shards * framerate;
+                        rateToSet = curEncoderRate;
 
-                        #if 0
-                        char buf[255];
-                        snprintf(&buf[0], sizeof(buf), "%.1f", encoderPacketSize / 1000);
-                        BOOST_LOG(info)
-                                << " nShards:" << _shards
-                                << " targetRate:" << int(_targetRate / 1000) << " kbps"
-                                << " - rateToSet:" << int(rateToSet / 1000) << " kbps"
-                                << " = " << int((_targetRate - rateToSet) / 1000)
-                                //<< " totalVideoRate " << int(totalVideoRate / 1000)
-                                << " accumFec:" << int(accumFec / 1000)
-                                << " PS:" << buf
-                                ;
-                        #endif
+                        //BOOST_LOG(info) << "shards:" << shards << "/" << _shards;
 
                         break;
                     }
+
                     curEncoderRate -= 100 * 1000.0f; // decrease by 100kbps
                 }
-                while (curEncoderRate > 0);
+                while (curEncoderRate > 0.0f);
 
 #else
-                const float additionalVideoRate = 2100 * 1000;
-                rateToSet -= additionalVideoRate;
+                //const float additionalVideoRate = 2100 * 1000;
+                //rateToSet -= additionalVideoRate;
+                rateToSet *= 0.8f;
 #endif
 
                 rateToSet = std::max(rateToSet, minEncoderRate);

@@ -37,6 +37,14 @@ namespace stream {
         int blocksize = 1408, // session.config.packetsize + MAX_RTP_HEADER_SIZE
         int multi_fec_threshold_multiplier = 90,
         size_t minparityshards = 2);
+  float calcFecForVideoPacketFast(
+        size_t &nShards,
+        size_t encoderPacketSize,
+        size_t fecPercentage,
+        int blocksize = 1408, // session.config.packetsize + MAX_RTP_HEADER_SIZE
+        int multi_fec_threshold_multiplier = 90,
+        size_t minparityshards = 2);
+
 
   namespace session {
     enum class state_e : int {

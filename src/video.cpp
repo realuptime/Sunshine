@@ -1496,6 +1496,8 @@ namespace video
 
                 _shards = 0;
                 float curEncoderRate = rateToSet;
+                // Decrease curEncoderRate by a certain amount until the resulting bitrate that include FEC and padding is less than
+                // SCREAM\s target bitrate minus audio and control
                 do
                 {
                     size_t shards = 0;
